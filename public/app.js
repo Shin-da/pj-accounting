@@ -7,7 +7,10 @@ const esc = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").re
 const money = (n) => CUR + (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const grams = (n) => (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 }) + " g";
 // commission rate: 0.05 -> "5%", 50 -> "₱50/g"
-const fmtRate = (v) => { const n = parseFloat(v); if (isNaN(n)) return v || "—"; return n > 0 && n < 1 ? (+(n*100).toFixed(2)) + "%" : "₱" + n + "/g"; };
+const fmtRate = (v) => { const n = parseFloat(v); if (isNaN(n)) return "N/A"; return n > 0 && n < 1 ? (+(n*100).toFixed(2)) + "%" : "₱" + n + "/g"; };
+// display helper: blanks / dashes / em-dashes / N-A placeholders -> "N/A"
+const BLANKISH = new Set(["", "-", "—", "–", "N/A", "NA", "n/a"]);
+const disp = (v) => { const s = String(v ?? "").trim(); return BLANKISH.has(s) ? "N/A" : esc(s); };
 const cssVar = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const ACCENT = "#4f46e5", TEAL = "#0d9488";
 const PIE = ["#4f46e5","#0d9488","#d97706","#16a34a","#dc2626","#7c3aed","#0891b2","#db2777"];
@@ -155,16 +158,18 @@ function renderCharts() {
 }
 
 // ── tables (columns adapt to what the API returned) ──────
+// cellFn receives (row, key, kind, rowIndex); the special key "__n" renders
+// the 1-based row number.
 function table(el, cols, rows, cellFn) {
   const head = `<thead><tr>${cols.map(c => `<th class="${c[2]==='num'?'num':''}">${c[1]}</th>`).join("")}</tr></thead>`;
-  const body = `<tbody>${rows.map(r => `<tr>${cols.map(c => `<td class="${c[2]==='num'?'num':''}">${cellFn(r,c[0],c[2])}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  const body = `<tbody>${rows.map((r, i) => `<tr>${cols.map(c => `<td class="${c[2]==='num'?'num':''}${c[0]==='__n'?' rownum':''}">${c[0]==="__n" ? (i+1) : cellFn(r,c[0],c[2],i)}</td>`).join("")}</tr>`).join("")}</tbody>`;
   $(el).innerHTML = head + body;
 }
 function renderTables() {
   const r0 = CURRENT.rows[0] || {};
   // Columns are driven by what the API returns — the server omits anything this
   // viewer isn't allowed to see (e.g. supplier is absent for partners).
-  const regCols = [["date","Date"],["invoice","Reserve #"]];
+  const regCols = [["__n","#"],["date","Date"],["invoice","Invoice #"]];
   if ("pjCode" in r0) regCols.push(["pjCode","PJ code"]);
   if ("itemCode" in r0) regCols.push(["itemCode","Item code"]);
   if ("itemType" in r0) regCols.push(["itemType","Item type"]);
@@ -176,8 +181,8 @@ function renderTables() {
   if ("capitalPerGram" in r0) regCols.push(["capitalPerGram","₱/g","num"]);
   regCols.push(["amount","Item amount","num"]);
   if ("commissionRate" in r0) regCols.push(["commissionRate","Comm. rate"]);
-  if ("commissionValue" in r0) regCols.push(["commissionValue","Commission","num"]);
-  table("#tblRegister", regCols, CURRENT.rows, (r,k,kind) => kind==="num" ? (k==="weight" ? (r[k]?grams(r[k]):"—") : (r[k]?money(r[k]):"—")) : (k==="commissionRate" ? fmtRate(r[k]) : esc(r[k])));
+  if ("commissionValue" in r0) regCols.push(["commissionValue","Commission amount","num"]);
+  table("#tblRegister", regCols, CURRENT.rows, (r,k,kind) => kind==="num" ? (k==="weight" ? (r[k]?grams(r[k]):"N/A") : (r[k]?money(r[k]):"N/A")) : (k==="commissionRate" ? fmtRate(r[k]) : disp(r[k])));
 
   const c0 = CURRENT.clients[0] || {};
   const clientCols = [["client","Client"],["invoices","Invoices","num"],["amount","Sales","num"]];
@@ -212,8 +217,8 @@ async function loadInvoices() {
   $("#invList").innerHTML = d.invoices.map(inv => `
     <div class="inv-row" data-reserve="${esc(inv.reserve)}" onclick="openInvoice('${inv.reserve.replace(/'/g,"\\'")}')">
       <div class="inv-row-top"><span class="inv-res">${esc(inv.reserve)}</span>${inv.hasProof ? '<span class="inv-clip" title="has proof">📎</span>' : ''}</div>
-      <div class="inv-row-sub">${esc(inv.clients.join(", ")) || "—"}</div>
-      <div class="inv-row-meta"><span>${inv.date || "—"}</span><span>${inv.count} item${inv.count>1?"s":""}</span><span class="mono">${money(inv.amount)}</span></div>
+      <div class="inv-row-sub">${esc(inv.clients.join(", ")) || "N/A"}</div>
+      <div class="inv-row-meta"><span>${inv.date || "N/A"}</span><span>${inv.count} item${inv.count>1?"s":""}</span><span class="mono">${money(inv.amount)}</span></div>
     </div>`).join("");
 }
 
@@ -232,13 +237,14 @@ async function openInvoice(reserve) {
   if ("supplierPrice" in i0) cols.push(["supplierPrice","Capital","num"]);
   cols.push(["amount","Item amount","num"]);
   if ("commissionRate" in i0) cols.push(["commissionRate","Comm. rate"]);
-  if ("commissionValue" in i0) cols.push(["commissionValue","Commission","num"]);
-  const cell = (it,k,kind) => kind==="num" ? (k==="weight" ? (it[k]?grams(it[k]):"—") : (it[k]?money(it[k]):"—")) : (k==="commissionRate" ? fmtRate(it[k]) : esc(it[k]||"—"));
+  if ("commissionValue" in i0) cols.push(["commissionValue","Commission amount","num"]);
+  cols.unshift(["__n","#"]);
+  const cell = (it,k,kind) => kind==="num" ? (k==="weight" ? (it[k]?grams(it[k]):"N/A") : (it[k]?money(it[k]):"N/A")) : (k==="commissionRate" ? fmtRate(it[k]) : disp(it[k]));
   const head = `<thead><tr>${cols.map(c=>`<th class="${c[2]==='num'?'num':''}">${c[1]}</th>`).join("")}</tr></thead>`;
-  const body = `<tbody>${d.items.map(it=>`<tr>${cols.map(c=>`<td class="${c[2]==='num'?'num':''}">${cell(it,c[0],c[2])}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  const body = `<tbody>${d.items.map((it,i)=>`<tr>${cols.map(c=>`<td class="${c[2]==='num'?'num':''}${c[0]==='__n'?' rownum':''}">${c[0]==="__n" ? (i+1) : cell(it,c[0],c[2])}</td>`).join("")}</tr>`).join("")}</tbody>`;
 
   const chips = [`<div class="inv-tot"><div class="kpi-label">Item amount</div><div class="inv-tot-v">${money(t.amount)}</div></div>`];
-  if (t.commissionValue !== undefined) chips.push(`<div class="inv-tot"><div class="kpi-label">Commission</div><div class="inv-tot-v accent">${money(t.commissionValue)}</div></div>`);
+  if (t.commissionValue !== undefined) chips.push(`<div class="inv-tot"><div class="kpi-label">Commission amount</div><div class="inv-tot-v accent">${money(t.commissionValue)}</div></div>`);
   if (t.cost !== undefined) chips.push(`<div class="inv-tot"><div class="kpi-label">Cost</div><div class="inv-tot-v">${money(t.cost)}</div></div>`);
   if (t.margin !== undefined) chips.push(`<div class="inv-tot"><div class="kpi-label">Margin</div><div class="inv-tot-v teal">${money(t.margin)}</div></div>`);
 
@@ -252,9 +258,9 @@ async function openInvoice(reserve) {
 
   $("#invDetail").innerHTML = `
     <div class="inv-head">
-      <div class="inv-eyebrow">Reserve no.</div>
+      <div class="inv-eyebrow">Invoice no.</div>
       <div class="inv-reserve">${esc(d.reserve)}</div>
-      <div class="inv-headmeta">${d.date || "—"} · ${esc(d.clients.join(", ")) || "—"} · ${t.count} item${t.count>1?"s":""}</div>
+      <div class="inv-headmeta">${d.date || "N/A"} · ${esc(d.clients.join(", ")) || "N/A"} · ${t.count} item${t.count>1?"s":""}</div>
     </div>
     <div class="inv-body">
       <div class="inv-items">
