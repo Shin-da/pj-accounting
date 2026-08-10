@@ -72,7 +72,9 @@ function parseSheet(aoa, sheetName) {
       client,
       pjCode: String(get("pjCode") ?? "").trim(),
       itemCode: String(get("itemCode") ?? "").trim(),
-      itemType: itemType || supplier || "Unspecified",   // fall back to supplier
+      // Keep item type RAW — do NOT fold the supplier name into it, or supplier
+      // data would leak into partner views through the "item type" field.
+      itemType,
       supplier: supplier || "—",
       weight: num(get("weight")),
       capitalPerGram: num(get("capitalPerGram")),
@@ -158,9 +160,12 @@ function aggregate(records, { from, to } = {}) {
     if (r.invoice) c.invoices.add(r.invoice);
     byClient.set(r.client, c);
 
-    const t = byType.get(r.itemType) || { itemType: r.itemType, amount: 0, commissionValue: 0, weight: 0, count: 0 };
+    // Admin/owner "By item type": item type if present, else fall back to the
+    // supplier so the grouping is meaningful (they're allowed to see supplier).
+    const itKey = r.itemType || r.supplier || "Unspecified";
+    const t = byType.get(itKey) || { itemType: itKey, amount: 0, commissionValue: 0, weight: 0, count: 0 };
     t.amount += r.amount; t.commissionValue += r.commissionValue; t.weight += r.weight; t.count += 1;
-    byType.set(r.itemType, t);
+    byType.set(itKey, t);
 
     // Group by commission type (Gold / Jewelry) — used for the partner view.
     const ckey = commLabel(r.commissionType);

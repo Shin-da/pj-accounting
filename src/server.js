@@ -69,13 +69,16 @@ app.post("/api/change-password", auth.requireAuth, (req, res) => {
 });
 
 // ── scoping helpers ──────────────────────────────────────
+// Partners never see: supplier name, cost/capital, markup, profit, ONELIVE
+// profit, or the raw commission rate — only the highlighted columns.
 function effectiveFlags(user, partner) {
   if (user.role === "partner") {
     const f = (partner && partner.flags) || {};
-    return { commission: !!f.commission, cost: !!f.cost, margin: !!f.margin, onelive: false };
+    return { commission: !!f.commission, cost: !!f.cost, margin: !!f.margin, onelive: false, supplier: false };
   }
-  return { commission: true, cost: true, margin: true, onelive: true }; // admin/owner
+  return { commission: true, cost: true, margin: true, onelive: true, supplier: true }; // admin/owner
 }
+const commLabel = (v) => ({ GOLD: "Gold", JEWELRY: "Jewelry" }[String(v || "").toUpperCase()] || (v ? String(v) : "—"));
 
 // Which partner is this viewer allowed to look at?
 function resolvePartner(req) {
@@ -115,8 +118,10 @@ function scope(agg, flags, dimension) {
     return o;
   });
   const rows = agg.rows.slice(0, 5000).map((r) => {
-    const o = { date: r.date, invoice: r.invoice, client: r.client, supplier: r.supplier,
-      itemType: r.itemType, weight: r.weight, amount: r.amount, pjCode: r.pjCode, itemCode: r.itemCode };
+    const o = { date: r.date, invoice: r.invoice, client: r.client,
+      itemType: r.itemType || "—", commissionType: commLabel(r.commissionType),
+      weight: r.weight, amount: r.amount, pjCode: r.pjCode || "—", itemCode: r.itemCode || "—" };
+    if (flags.supplier) o.supplier = r.supplier;                       // admin/owner only
     if (flags.cost) { o.supplierPrice = r.supplierPrice; o.capitalPerGram = r.capitalPerGram; }
     if (flags.commission) o.commissionValue = r.commissionValue;
     return o;
@@ -143,8 +148,10 @@ app.get("/api/report", auth.requireAuth, (req, res) => {
 // ── invoices ─────────────────────────────────────────────
 // Field-scoped copies for a partner's visibility flags.
 function scopeItem(r, flags) {
-  const o = { reserve: r.invoice, date: r.date, client: r.client, supplier: r.supplier,
-    itemType: r.itemType, pjCode: r.pjCode, itemCode: r.itemCode, weight: r.weight, amount: r.amount };
+  const o = { reserve: r.invoice, date: r.date, client: r.client,
+    itemType: r.itemType || "—", commissionType: commLabel(r.commissionType),
+    pjCode: r.pjCode || "—", itemCode: r.itemCode || "—", weight: r.weight, amount: r.amount };
+  if (flags.supplier) o.supplier = r.supplier;                        // admin/owner only
   if (flags.cost) { o.supplierPrice = r.supplierPrice; o.capitalPerGram = r.capitalPerGram; }
   if (flags.commission) o.commissionValue = r.commissionValue;
   return o;

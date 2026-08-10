@@ -160,10 +160,19 @@ function table(el, cols, rows, cellFn) {
 }
 function renderTables() {
   const r0 = CURRENT.rows[0] || {};
-  const regCols = [["date","Date"],["invoice","Reserve #"],["client","Client"],["supplier","Supplier"]];
+  // Columns are driven by what the API returns — the server omits anything this
+  // viewer isn't allowed to see (e.g. supplier is absent for partners).
+  const regCols = [["date","Date"],["invoice","Reserve #"]];
+  if ("pjCode" in r0) regCols.push(["pjCode","PJ code"]);
+  if ("itemCode" in r0) regCols.push(["itemCode","Item code"]);
+  if ("itemType" in r0) regCols.push(["itemType","Item type"]);
+  regCols.push(["client","Client"]);
+  if ("supplier" in r0) regCols.push(["supplier","Supplier"]);
+  if ("commissionType" in r0) regCols.push(["commissionType","Comm. type"]);
+  regCols.push(["weight","Weight","num"]);
   if ("supplierPrice" in r0) regCols.push(["supplierPrice","Capital","num"]);
   if ("capitalPerGram" in r0) regCols.push(["capitalPerGram","₱/g","num"]);
-  regCols.push(["weight","Weight","num"], ["amount","Selling price","num"]);
+  regCols.push(["amount","Selling price","num"]);
   if ("commissionValue" in r0) regCols.push(["commissionValue","Commission","num"]);
   table("#tblRegister", regCols, CURRENT.rows, (r,k,kind) => kind==="num" ? (k==="weight" ? (r[k]?grams(r[k]):"—") : (r[k]?money(r[k]):"—")) : esc(r[k]));
 
@@ -213,7 +222,10 @@ async function openInvoice(reserve) {
   currentInvoice = d;
   const t = d.totals, i0 = d.items[0] || {};
 
-  const cols = [["pjCode","PJ code"],["itemCode","Item code"],["supplier","Supplier"],["itemType","Type"],["weight","Weight","num"]];
+  const cols = [["pjCode","PJ code"],["itemCode","Item code"],["itemType","Type"]];
+  if ("supplier" in i0) cols.push(["supplier","Supplier"]);
+  if ("commissionType" in i0) cols.push(["commissionType","Comm. type"]);
+  cols.push(["weight","Weight","num"]);
   if ("supplierPrice" in i0) cols.push(["supplierPrice","Capital","num"]);
   cols.push(["amount","Selling","num"]);
   if ("commissionValue" in i0) cols.push(["commissionValue","Commission","num"]);
