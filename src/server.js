@@ -19,6 +19,9 @@ const auth = require("./auth");
 const partners = require("./partners");
 const proofs = require("./proofs");
 
+// Relative, repo-rooted path shown to admins so they know where an upload landed.
+function datasetDisplayPath(slug) { return `data/datasets/${slug}.json`; }
+
 // Boot-time setup: seed the first admin, migrate any existing dataset to RDR.
 auth.seedIfEmpty("jeffmathewg@gmail.com");
 partners.migrateIfNeeded();
@@ -237,8 +240,9 @@ app.post("/api/upload", auth.requireRole("admin"), upload.single("file"), (req, 
   try {
     const parsed = parseWorkbookBuffer(req.file.buffer);
     if (!parsed.records.length) return res.status(400).json({ error: parsed.meta.error || "no rows found", meta: parsed.meta });
+    parsed.meta.fileName = req.file.originalname;
     partners.saveDataset(partner.slug, parsed);
-    res.json({ ok: true, partner: partner.slug, meta: parsed.meta });
+    res.json({ ok: true, partner: partner.slug, meta: parsed.meta, path: datasetDisplayPath(partner.slug) });
   } catch (e) {
     res.status(500).json({ error: "could not read file: " + e.message });
   }
@@ -246,7 +250,15 @@ app.post("/api/upload", auth.requireRole("admin"), upload.single("file"), (req, 
 
 // ── partner management (admin write, owner read) ─────────
 app.get("/api/partners", auth.requireRole("admin", "owner"), (req, res) => {
-  res.json({ partners: partners.listPartners() });
+  const list = partners.listPartners().map((p) => {
+    const ds = partners.loadDataset(p.slug);
+    const dataset = ds.meta ? {
+      fileName: ds.meta.fileName || null, rows: ds.meta.rows,
+      uploadedAt: ds.meta.uploadedAt, path: datasetDisplayPath(p.slug),
+    } : null;
+    return { ...p, dataset };
+  });
+  res.json({ partners: list });
 });
 app.post("/api/partners", auth.requireRole("admin"), (req, res) => {
   try { res.json({ ok: true, partner: partners.createPartner(req.body || {}) }); }

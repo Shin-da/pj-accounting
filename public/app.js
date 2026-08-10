@@ -106,7 +106,9 @@ async function load() {
   }
   CURRENT = data;
   $("#emptyState").hidden = true; $("#overviewContent").hidden = false; $("#filterBar").hidden = false;
-  $("#updatedFoot").textContent = data.meta ? "Updated " + data.meta.uploadedAt.slice(0,10) : "—";
+  $("#updatedFoot").textContent = data.meta
+    ? (data.meta.fileName ? data.meta.fileName + " · " : "") + "Updated " + data.meta.uploadedAt.slice(0,10)
+    : "—";
   $("#ncRows").textContent = data.rowsTotal.toLocaleString();
   $("#ncClients").textContent = data.clients.length;
   $("#ncTypes").textContent = data.types.length;
@@ -290,13 +292,19 @@ async function loadPortfolio() {
 }
 
 // ── admin: partners ──────────────────────────────────────
+let partnersCache = [];
 async function loadPartners() {
   const d = await (await fetch("/api/partners")).json();
+  partnersCache = d.partners;
   $("#partnersList").innerHTML = d.partners.map(p => {
     const f = p.flags || {};
     const cb = (key,label) => `<label><input type="checkbox" data-slug="${p.slug}" data-flag="${key}" ${f[key]?"checked":""}> ${label}</label>`;
+    const fileInfo = p.dataset
+      ? `<div class="page-sub" style="margin-top:6px;">📄 ${esc(p.dataset.fileName || "unnamed file")} — ${p.dataset.rows.toLocaleString()} rows, uploaded ${p.dataset.uploadedAt.slice(0,10)}<br><span class="mono" style="font-size:11px;">${esc(p.dataset.path)}</span></div>`
+      : `<div class="page-sub" style="margin-top:6px;">No file uploaded yet.</div>`;
     return `<div class="partner-row"><div class="pr-name">${esc(p.name)} <span class="page-sub">/${p.slug}</span></div>
-      <div class="page-sub" style="margin:4px 0 6px;">What this partner may see:</div>
+      ${fileInfo}
+      <div class="page-sub" style="margin:8px 0 6px;">What this partner may see:</div>
       <div class="flag-toggles">${cb("commission","Their commission")}${cb("cost","Supplier cost")}${cb("margin","Gross margin")}${cb("onelive","ONELIVE profit")}</div></div>`;
   }).join("") || `<div class="page-sub">No partners yet.</div>`;
   $$("#partnersList input[type=checkbox]").forEach(cb => cb.addEventListener("change", async () => {
@@ -338,15 +346,30 @@ $("#addUser").addEventListener("click", async () => {
 });
 
 // ── upload / account menu / modals ───────────────────────
-function openUpload() { $("#ovl").classList.add("open"); $("#modal").classList.add("open"); $("#uploadMsg").textContent=""; }
+function updateUploadCurrent() {
+  const p = partnersCache.find(x => x.slug === $("#uploadPartner").value);
+  $("#uploadCurrent").textContent = p && p.dataset
+    ? `Currently loaded: ${p.dataset.fileName || "unnamed file"} — ${p.dataset.rows.toLocaleString()} rows, uploaded ${p.dataset.uploadedAt.slice(0,10)}. Uploading now will replace it.`
+    : "No file uploaded yet for this partner.";
+}
+async function openUpload() {
+  $("#ovl").classList.add("open"); $("#modal").classList.add("open"); $("#uploadMsg").textContent="";
+  const d = await (await fetch("/api/partners")).json(); partnersCache = d.partners;
+  updateUploadCurrent();
+}
 function closeModals() { $("#ovl").classList.remove("open"); $("#modal").classList.remove("open"); $("#pwModal").classList.remove("open"); }
 $("#uploadBtn").addEventListener("click", openUpload);
+$("#uploadPartner").addEventListener("change", updateUploadCurrent);
 $("#doUpload").addEventListener("click", async () => {
   const f = $("#fileInput").files[0]; if (!f) { $("#uploadMsg").textContent = "Choose a file first."; return; }
   const fd = new FormData(); fd.append("file", f); fd.append("partner", $("#uploadPartner").value);
   $("#uploadMsg").textContent = "Uploading…";
   const r = await (await fetch("/api/upload", { method:"POST", body: fd })).json();
-  if (r.ok) { $("#uploadMsg").textContent = `Loaded ${r.meta.rows} rows for ${r.partner}.`; setTimeout(()=>{ closeModals(); if (r.partner===partnerSlug) load(); }, 700); }
+  if (r.ok) {
+    $("#uploadMsg").textContent = `Loaded "${r.meta.fileName}" — ${r.meta.rows} rows for ${r.partner}. Saved to ${r.path}.`;
+    const d = await (await fetch("/api/partners")).json(); partnersCache = d.partners; updateUploadCurrent();
+    setTimeout(()=>{ closeModals(); if (r.partner===partnerSlug) load(); }, 1600);
+  }
   else $("#uploadMsg").textContent = "Failed: " + (r.error || "unknown");
 });
 

@@ -11,6 +11,16 @@
   padding: 0;
 }
 
+/* Elements toggle visibility via the `hidden` attribute in app.js. Several
+   classes below (.btn, .empty-state, .filter-bar, .range-inline, .company-badge,
+   .trend-card…) set their own `display`, which — per CSS cascade origin rules —
+   overrides the browser's default `[hidden] { display: none }` even though it's
+   a plain author rule with no special specificity trick. Reassert it here so
+   `hidden` always actually hides, everywhere. */
+[hidden] {
+  display: none !important;
+}
+
 /* ─────────────────────────────────────────
    DESIGN TOKENS
 ───────────────────────────────────────── */
