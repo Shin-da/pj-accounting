@@ -123,7 +123,7 @@ function scope(agg, flags, dimension) {
       weight: r.weight, amount: r.amount, pjCode: r.pjCode || "—", itemCode: r.itemCode || "—" };
     if (flags.supplier) o.supplier = r.supplier;                       // admin/owner only
     if (flags.cost) { o.supplierPrice = r.supplierPrice; o.capitalPerGram = r.capitalPerGram; }
-    if (flags.commission) o.commissionValue = r.commissionValue;
+    if (flags.commission) { o.commissionRate = r.commission; o.commissionValue = r.commissionValue; }
     return o;
   });
   return { kpi, clients, types, months, rows, rowsTotal: agg.rows.length };
@@ -153,7 +153,7 @@ function scopeItem(r, flags) {
     pjCode: r.pjCode || "—", itemCode: r.itemCode || "—", weight: r.weight, amount: r.amount };
   if (flags.supplier) o.supplier = r.supplier;                        // admin/owner only
   if (flags.cost) { o.supplierPrice = r.supplierPrice; o.capitalPerGram = r.capitalPerGram; }
-  if (flags.commission) o.commissionValue = r.commissionValue;
+  if (flags.commission) { o.commissionRate = r.commission; o.commissionValue = r.commissionValue; }
   return o;
 }
 function scopeInvoice(inv, flags, hasProof) {

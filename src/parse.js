@@ -9,7 +9,12 @@
 const XLSX = require("xlsx");
 const { COLUMN_ALIASES, MASTER_SHEET_RE } = require("../config");
 
-const norm = (s) => String(s ?? "").toUpperCase().replace(/\s+/g, " ").trim();
+const norm = (s) => String(s ?? "").toUpperCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
+
+// When a header appears more than once (e.g. two "RDR COMMISSION AMOUNT"
+// columns), take the LAST one for these fields — that's the highlighted /
+// selling-based commission the partner should see.
+const PREFER_LAST = new Set(["commissionValue"]);
 
 function num(v) {
   if (v == null || v === "") return 0;
@@ -33,7 +38,8 @@ function mapHeaders(headerRow) {
   const map = {};
   for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
     for (const a of aliases) {
-      const idx = cells.indexOf(norm(a));
+      const na = norm(a);
+      const idx = PREFER_LAST.has(field) ? cells.lastIndexOf(na) : cells.indexOf(na);
       if (idx >= 0) { map[field] = idx; break; }
     }
   }

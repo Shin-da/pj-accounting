@@ -6,6 +6,8 @@ const charts = {};
 const esc = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const money = (n) => CUR + Math.round(n || 0).toLocaleString();
 const grams = (n) => (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 }) + " g";
+// commission rate: 0.05 -> "5%", 50 -> "₱50/g"
+const fmtRate = (v) => { const n = parseFloat(v); if (isNaN(n)) return v || "—"; return n > 0 && n < 1 ? (+(n*100).toFixed(2)) + "%" : "₱" + n + "/g"; };
 const cssVar = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const ACCENT = "#4f46e5", TEAL = "#0d9488";
 const PIE = ["#4f46e5","#0d9488","#d97706","#16a34a","#dc2626","#7c3aed","#0891b2","#db2777"];
@@ -173,8 +175,9 @@ function renderTables() {
   if ("supplierPrice" in r0) regCols.push(["supplierPrice","Capital","num"]);
   if ("capitalPerGram" in r0) regCols.push(["capitalPerGram","₱/g","num"]);
   regCols.push(["amount","Selling price","num"]);
+  if ("commissionRate" in r0) regCols.push(["commissionRate","Comm. rate"]);
   if ("commissionValue" in r0) regCols.push(["commissionValue","Commission","num"]);
-  table("#tblRegister", regCols, CURRENT.rows, (r,k,kind) => kind==="num" ? (k==="weight" ? (r[k]?grams(r[k]):"—") : (r[k]?money(r[k]):"—")) : esc(r[k]));
+  table("#tblRegister", regCols, CURRENT.rows, (r,k,kind) => kind==="num" ? (k==="weight" ? (r[k]?grams(r[k]):"—") : (r[k]?money(r[k]):"—")) : (k==="commissionRate" ? fmtRate(r[k]) : esc(r[k])));
 
   const c0 = CURRENT.clients[0] || {};
   const clientCols = [["client","Client"],["invoices","Invoices","num"],["amount","Sales","num"]];
@@ -228,8 +231,9 @@ async function openInvoice(reserve) {
   cols.push(["weight","Weight","num"]);
   if ("supplierPrice" in i0) cols.push(["supplierPrice","Capital","num"]);
   cols.push(["amount","Selling","num"]);
+  if ("commissionRate" in i0) cols.push(["commissionRate","Comm. rate"]);
   if ("commissionValue" in i0) cols.push(["commissionValue","Commission","num"]);
-  const cell = (it,k,kind) => kind==="num" ? (k==="weight" ? (it[k]?grams(it[k]):"—") : (it[k]?money(it[k]):"—")) : esc(it[k]||"—");
+  const cell = (it,k,kind) => kind==="num" ? (k==="weight" ? (it[k]?grams(it[k]):"—") : (it[k]?money(it[k]):"—")) : (k==="commissionRate" ? fmtRate(it[k]) : esc(it[k]||"—"));
   const head = `<thead><tr>${cols.map(c=>`<th class="${c[2]==='num'?'num':''}">${c[1]}</th>`).join("")}</tr></thead>`;
   const body = `<tbody>${d.items.map(it=>`<tr>${cols.map(c=>`<td class="${c[2]==='num'?'num':''}">${cell(it,c[0],c[2])}</td>`).join("")}</tr>`).join("")}</tbody>`;
 
