@@ -111,7 +111,16 @@ function parseWorkbookBuffer(buf) {
   }
 
   // Prefer master register sheets; otherwise fall back to the first data sheet.
-  const masters = names.filter((n) => MASTER_SHEET_RE.test(n));
+  let masters = names.filter((n) => MASTER_SHEET_RE.test(n));
+  // Among masters, keep only the COMPLETE register sheet(s): the ones mapping
+  // the most columns. This drops stub tabs (e.g. a 7-column "AUGUST" draft
+  // with no commission columns) whose rows would otherwise double-count —
+  // while still combining multiple full-column month sheets if they exist.
+  if (masters.length > 1) {
+    const score = (n) => parsedByName[n].columns.length;
+    const best = Math.max(...masters.map(score));
+    masters = masters.filter((n) => score(n) === best);
+  }
   const used = masters.length ? masters : [names[0]];
 
   let records = [], columns = new Set();
