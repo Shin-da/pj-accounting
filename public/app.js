@@ -40,12 +40,6 @@ async function boot() {
   sw.value = partnerSlug;
   sw.addEventListener("change", () => { partnerSlug = sw.value; $("#brandSub").textContent = me.partners.find(p=>p.slug===partnerSlug)?.name||""; load(); });
 
-  // Partners break their report down by commission type, not item type.
-  if (me.user.role === "partner") {
-    const navTypes = document.querySelector('.nav-item[data-page="types"]');
-    if (navTypes) navTypes.innerHTML = '<span class="ni">◇</span> By commission type <span class="n-count" id="ncTypes"></span>';
-  }
-
   if (isAdmin) { fillPartnerSelect("#uploadPartner"); fillPartnerSelect("#nuPartner"); }
   load();
 }

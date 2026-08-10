@@ -131,8 +131,8 @@ app.get("/api/report", auth.requireAuth, (req, res) => {
   const ds = partners.loadDataset(partner.slug);
   const flags = effectiveFlags(req.user, partner);
   const agg = aggregate(ds.records, { from: req.query.from, to: req.query.to });
-  // Partners group by commission type (Gold/Jewelry); admin & owner by item type.
-  const dimension = req.user.role === "partner" ? "commission" : "item";
+  // Everyone breaks down by commission type (Gold/Jewelry), not raw item/SKU type.
+  const dimension = "commission";
   res.json({
     currency: CURRENCY, partner: { slug: partner.slug, name: partner.name },
     meta: ds.meta, flags, typeDimension: dimension,

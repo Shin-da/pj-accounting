@@ -74,7 +74,7 @@ function findByEmail(email) {
 }
 function findById(id) { return load().find((u) => u.id === id) || null; }
 
-function createUser({ email, name, role, partner, password }) {
+function createUser({ email, name, role, partner, password, mustChange = true }) {
   const users = load();
   if (!email || !password) throw new Error("email and password required");
   if (!ROLES.includes(role)) throw new Error("invalid role");
@@ -82,7 +82,7 @@ function createUser({ email, name, role, partner, password }) {
   const { salt, hash } = hashPassword(password);
   const u = { id: crypto.randomUUID(), email: String(email).trim(), name: name || email,
     role, partner: role === "partner" ? (partner || null) : null,
-    salt, hash, disabled: false, mustChange: true, createdAt: new Date().toISOString() };
+    salt, hash, disabled: false, mustChange: !!mustChange, createdAt: new Date().toISOString() };
   users.push(u); save(users);
   return publicUser(u);
 }
@@ -143,9 +143,33 @@ function setSession(res, user) {
 function clearSession(res) { res.clearCookie(COOKIE); }
 
 // ── seed ─────────────────────────────────────────────────
+// On hosts with no persistent disk (e.g. Render's free plan), the whole data/
+// dir is wiped on every deploy — so the user store is "empty" again on every
+// boot. Set SEED_ACCOUNTS (an env var, never committed) to a JSON array of
+// {email,name,role,partner,password} to recreate a fixed set of accounts with
+// known passwords every time, instead of a fresh random one-off admin.
+function parseSeedAccounts() {
+  const raw = process.env.SEED_ACCOUNTS;
+  if (!raw) return null;
+  try {
+    const list = JSON.parse(raw);
+    return Array.isArray(list) ? list.filter((a) => a && a.email && a.password && a.role) : null;
+  } catch (_) { return null; }
+}
 function seedIfEmpty(adminEmail) {
   const users = load();
   if (users.length) return null;
+
+  const seedList = parseSeedAccounts();
+  if (seedList && seedList.length) {
+    for (const acc of seedList) {
+      try { createUser({ ...acc, mustChange: false }); }
+      catch (e) { console.warn(" ! could not seed " + acc.email + ": " + e.message); }
+    }
+    console.log(`\n * seeded ${seedList.length} account(s) from SEED_ACCOUNTS\n`);
+    return null;
+  }
+
   const temp = crypto.randomBytes(6).toString("base64url"); // ~8 chars
   const { salt, hash } = hashPassword(temp);
   const u = { id: crypto.randomUUID(), email: adminEmail, name: "Accounting Admin",
