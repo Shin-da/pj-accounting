@@ -174,7 +174,7 @@ function renderTables() {
   regCols.push(["weight","Weight","num"]);
   if ("supplierPrice" in r0) regCols.push(["supplierPrice","Capital","num"]);
   if ("capitalPerGram" in r0) regCols.push(["capitalPerGram","₱/g","num"]);
-  regCols.push(["amount","Selling price","num"]);
+  regCols.push(["amount","Item amount","num"]);
   if ("commissionRate" in r0) regCols.push(["commissionRate","Comm. rate"]);
   if ("commissionValue" in r0) regCols.push(["commissionValue","Commission","num"]);
   table("#tblRegister", regCols, CURRENT.rows, (r,k,kind) => kind==="num" ? (k==="weight" ? (r[k]?grams(r[k]):"—") : (r[k]?money(r[k]):"—")) : (k==="commissionRate" ? fmtRate(r[k]) : esc(r[k])));
@@ -230,14 +230,14 @@ async function openInvoice(reserve) {
   if ("commissionType" in i0) cols.push(["commissionType","Comm. type"]);
   cols.push(["weight","Weight","num"]);
   if ("supplierPrice" in i0) cols.push(["supplierPrice","Capital","num"]);
-  cols.push(["amount","Selling","num"]);
+  cols.push(["amount","Item amount","num"]);
   if ("commissionRate" in i0) cols.push(["commissionRate","Comm. rate"]);
   if ("commissionValue" in i0) cols.push(["commissionValue","Commission","num"]);
   const cell = (it,k,kind) => kind==="num" ? (k==="weight" ? (it[k]?grams(it[k]):"—") : (it[k]?money(it[k]):"—")) : (k==="commissionRate" ? fmtRate(it[k]) : esc(it[k]||"—"));
   const head = `<thead><tr>${cols.map(c=>`<th class="${c[2]==='num'?'num':''}">${c[1]}</th>`).join("")}</tr></thead>`;
   const body = `<tbody>${d.items.map(it=>`<tr>${cols.map(c=>`<td class="${c[2]==='num'?'num':''}">${cell(it,c[0],c[2])}</td>`).join("")}</tr>`).join("")}</tbody>`;
 
-  const chips = [`<div class="inv-tot"><div class="kpi-label">Selling</div><div class="inv-tot-v">${money(t.amount)}</div></div>`];
+  const chips = [`<div class="inv-tot"><div class="kpi-label">Item amount</div><div class="inv-tot-v">${money(t.amount)}</div></div>`];
   if (t.commissionValue !== undefined) chips.push(`<div class="inv-tot"><div class="kpi-label">Commission</div><div class="inv-tot-v accent">${money(t.commissionValue)}</div></div>`);
   if (t.cost !== undefined) chips.push(`<div class="inv-tot"><div class="kpi-label">Cost</div><div class="inv-tot-v">${money(t.cost)}</div></div>`);
   if (t.margin !== undefined) chips.push(`<div class="inv-tot"><div class="kpi-label">Margin</div><div class="inv-tot-v teal">${money(t.margin)}</div></div>`);
