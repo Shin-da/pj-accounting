@@ -63,8 +63,9 @@ function parseSheet(aoa, sheetName) {
     // otherwise fall back to a numeric value in the "RDR COMMISSION" column.
     const commissionValue = map.commissionValue != null
       ? num(get("commissionValue")) : num(get("commission"));
-    const supplier = String(get("supplier") ?? "").trim();
-    const itemType = String(get("itemType") ?? "").trim();
+    const blank = (v) => { const s = String(v ?? "").trim(); return s === "-" ? "" : s; };
+    const supplier = blank(get("supplier"));
+    const itemType = blank(get("itemType"));
     records.push({
       date: toISO(get("date")),
       invoice: String(get("invoice") ?? "").trim(),
@@ -141,7 +142,8 @@ function aggregate(records, { from, to } = {}) {
     clients: new Set(rows.map((r) => r.client).filter(Boolean)).size,
     amount: 0, commissionValue: 0, weight: 0, cost: 0, onelive: 0,
   };
-  const byClient = new Map(), byType = new Map(), byMonth = new Map();
+  const byClient = new Map(), byType = new Map(), byMonth = new Map(), byCommType = new Map();
+  const commLabel = (v) => ({ GOLD: "Gold", JEWELRY: "Jewelry" }[String(v || "").toUpperCase()] || (v ? String(v) : "Other"));
 
   for (const r of rows) {
     const cost = r.supplierPrice || (r.weight * r.capitalPerGram);
@@ -160,6 +162,12 @@ function aggregate(records, { from, to } = {}) {
     t.amount += r.amount; t.commissionValue += r.commissionValue; t.weight += r.weight; t.count += 1;
     byType.set(r.itemType, t);
 
+    // Group by commission type (Gold / Jewelry) — used for the partner view.
+    const ckey = commLabel(r.commissionType);
+    const ct = byCommType.get(ckey) || { itemType: ckey, amount: 0, commissionValue: 0, weight: 0, count: 0 };
+    ct.amount += r.amount; ct.commissionValue += r.commissionValue; ct.weight += r.weight; ct.count += 1;
+    byCommType.set(ckey, ct);
+
     const mk = (r.date || "").slice(0, 7) || "—";
     const m = byMonth.get(mk) || { month: mk, amount: 0, commissionValue: 0 };
     m.amount += r.amount; m.commissionValue += r.commissionValue;
@@ -171,9 +179,10 @@ function aggregate(records, { from, to } = {}) {
     .map((c) => ({ ...c, invoices: c.invoices.size, margin: c.amount - c.cost }))
     .sort((a, b) => b.amount - a.amount);
   const types = [...byType.values()].sort((a, b) => b.amount - a.amount);
+  const commTypes = [...byCommType.values()].sort((a, b) => b.amount - a.amount);
   const months = [...byMonth.values()].sort((a, b) => a.month.localeCompare(b.month));
 
-  return { kpi, clients, types, months, rows };
+  return { kpi, clients, types, commTypes, months, rows };
 }
 
 module.exports = { parseWorkbookBuffer, aggregate };

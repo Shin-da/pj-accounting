@@ -40,9 +40,18 @@ async function boot() {
   sw.value = partnerSlug;
   sw.addEventListener("change", () => { partnerSlug = sw.value; $("#brandSub").textContent = me.partners.find(p=>p.slug===partnerSlug)?.name||""; load(); });
 
+  // Partners break their report down by commission type, not item type.
+  if (me.user.role === "partner") {
+    const navTypes = document.querySelector('.nav-item[data-page="types"]');
+    if (navTypes) navTypes.innerHTML = '<span class="ni">◇</span> By commission type <span class="n-count" id="ncTypes"></span>';
+  }
+
   if (isAdmin) { fillPartnerSelect("#uploadPartner"); fillPartnerSelect("#nuPartner"); }
   load();
 }
+
+const isCommDim = () => CURRENT && CURRENT.typeDimension === "commission";
+const typeLabel = () => (isCommDim() ? "commission type" : "item type");
 
 function fillPartnerSelect(sel) {
   $(sel).innerHTML = ME.partners.map(p => `<option value="${p.slug}">${esc(p.name)}</option>`).join("");
@@ -119,6 +128,7 @@ function renderKPIs() {
 function mk(id, cfg) { if (charts[id]) charts[id].destroy(); charts[id] = new Chart($("#"+id), cfg); }
 function renderCharts() {
   const tick = cssVar("--muted") || "#78716c", grid = cssVar("--border") || "rgba(0,0,0,.06)";
+  const tt = $("#typeChartTitle"); if (tt) tt.textContent = "Sales by " + typeLabel();
   const hasComm = CURRENT.kpi.commissionValue !== undefined;
   const m = CURRENT.months;
   const ds = [{ label: "Sales", data: m.map(x=>x.amount), borderColor: ACCENT, backgroundColor: "rgba(79,70,229,.12)", fill: true, tension: .35, borderWidth: 2, pointRadius: 2, yAxisID: "y" }];
@@ -168,7 +178,7 @@ function renderTables() {
   table("#tblClients", clientCols, CURRENT.clients, (r,k,kind) => kind==="num" ? (k==="invoices"?r[k]:money(r[k])) : esc(r[k]));
 
   const t0 = CURRENT.types[0] || {};
-  const typeCols = [["itemType","Item type"],["count","Items","num"],["weight","Weight","num"],["amount","Sales","num"]];
+  const typeCols = [["itemType", isCommDim() ? "Commission type" : "Item type"],["count","Items","num"],["weight","Weight","num"],["amount","Sales","num"]];
   if ("commissionValue" in t0) typeCols.push(["commissionValue","Commission","num"]);
   table("#tblTypes", typeCols, CURRENT.types, (r,k,kind) => kind==="num" ? (k==="count"?r[k]:k==="weight"?grams(r[k]):money(r[k])) : esc(r[k]));
 }

@@ -81,7 +81,10 @@ function resolvePartner(req) {
 }
 
 // Remove fields the viewer isn't allowed to see, on a *copy*.
-function scope(agg, flags) {
+// `dimension` chooses the breakdown: "item" (supplier/item type) for admin &
+// owner, "commission" (Gold / Jewelry) for partners.
+function scope(agg, flags, dimension) {
+  const typeSource = dimension === "commission" ? agg.commTypes : agg.types;
   const kpi = { lines: agg.kpi.lines, invoices: agg.kpi.invoices, clients: agg.kpi.clients,
     amount: agg.kpi.amount, weight: agg.kpi.weight };
   if (flags.commission) kpi.commissionValue = agg.kpi.commissionValue;
@@ -96,7 +99,7 @@ function scope(agg, flags) {
     if (flags.margin) o.margin = c.margin;
     return o;
   });
-  const types = agg.types.map((t) => {
+  const types = typeSource.map((t) => {
     const o = { itemType: t.itemType, amount: t.amount, weight: t.weight, count: t.count };
     if (flags.commission) o.commissionValue = t.commissionValue;
     return o;
@@ -123,10 +126,12 @@ app.get("/api/report", auth.requireAuth, (req, res) => {
   const ds = partners.loadDataset(partner.slug);
   const flags = effectiveFlags(req.user, partner);
   const agg = aggregate(ds.records, { from: req.query.from, to: req.query.to });
+  // Partners group by commission type (Gold/Jewelry); admin & owner by item type.
+  const dimension = req.user.role === "partner" ? "commission" : "item";
   res.json({
     currency: CURRENCY, partner: { slug: partner.slug, name: partner.name },
-    meta: ds.meta, flags,
-    ...scope(agg, flags),
+    meta: ds.meta, flags, typeDimension: dimension,
+    ...scope(agg, flags, dimension),
   });
 });
 
