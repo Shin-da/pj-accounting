@@ -68,6 +68,7 @@ $$(".nav-item").forEach(b => b.addEventListener("click", () => {
   if (b.dataset.page === "portfolio") loadPortfolio();
   if (b.dataset.page === "partners") loadPartners();
   if (b.dataset.page === "users") loadUsers();
+  if (b.dataset.page === "invoices") loadInvoices();
 }));
 
 // ── period ───────────────────────────────────────────────
@@ -191,6 +192,78 @@ function downloadCSV() {
   const csv = rows.map(r => r.map(c => `"${String(c ?? "").replace(/"/g,'""')}"`).join(",")).join("\r\n");
   const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
   a.download = `${partnerSlug||"report"}-sales-register.csv`; a.click();
+}
+
+// ── invoices ─────────────────────────────────────────────
+let currentInvoice = null;
+async function loadInvoices() {
+  const qs = new URLSearchParams(); if (partnerSlug) qs.set("partner", partnerSlug);
+  const d = await (await fetch("/api/invoices?" + qs)).json();
+  $("#ncInvoices").textContent = (d.invoices || []).length;
+  if (!d.invoices || !d.invoices.length) { $("#invList").innerHTML = `<div class="page-sub" style="padding:16px;">No invoices for this partner.</div>`; return; }
+  $("#invList").innerHTML = d.invoices.map(inv => `
+    <div class="inv-row" data-reserve="${esc(inv.reserve)}" onclick="openInvoice('${inv.reserve.replace(/'/g,"\\'")}')">
+      <div class="inv-row-top"><span class="inv-res">${esc(inv.reserve)}</span>${inv.hasProof ? '<span class="inv-clip" title="has proof">📎</span>' : ''}</div>
+      <div class="inv-row-sub">${esc(inv.clients.join(", ")) || "—"}</div>
+      <div class="inv-row-meta"><span>${inv.date || "—"}</span><span>${inv.count} item${inv.count>1?"s":""}</span><span class="mono">${money(inv.amount)}</span></div>
+    </div>`).join("");
+}
+
+async function openInvoice(reserve) {
+  document.querySelectorAll(".inv-row").forEach(r => r.classList.toggle("active", r.dataset.reserve === reserve));
+  const qs = new URLSearchParams(); if (partnerSlug) qs.set("partner", partnerSlug); qs.set("reserve", reserve);
+  const d = await (await fetch("/api/invoice?" + qs)).json();
+  if (d.error) { $("#invDetail").innerHTML = `<div class="empty-state"><div class="empty-text">${esc(d.error)}</div></div>`; return; }
+  currentInvoice = d;
+  const t = d.totals, i0 = d.items[0] || {};
+
+  const cols = [["pjCode","PJ code"],["itemCode","Item code"],["supplier","Supplier"],["itemType","Type"],["weight","Weight","num"]];
+  if ("supplierPrice" in i0) cols.push(["supplierPrice","Capital","num"]);
+  cols.push(["amount","Selling","num"]);
+  if ("commissionValue" in i0) cols.push(["commissionValue","Commission","num"]);
+  const cell = (it,k,kind) => kind==="num" ? (k==="weight" ? (it[k]?grams(it[k]):"—") : (it[k]?money(it[k]):"—")) : esc(it[k]||"—");
+  const head = `<thead><tr>${cols.map(c=>`<th class="${c[2]==='num'?'num':''}">${c[1]}</th>`).join("")}</tr></thead>`;
+  const body = `<tbody>${d.items.map(it=>`<tr>${cols.map(c=>`<td class="${c[2]==='num'?'num':''}">${cell(it,c[0],c[2])}</td>`).join("")}</tr>`).join("")}</tbody>`;
+
+  const chips = [`<div class="inv-tot"><div class="kpi-label">Selling</div><div class="inv-tot-v">${money(t.amount)}</div></div>`];
+  if (t.commissionValue !== undefined) chips.push(`<div class="inv-tot"><div class="kpi-label">Commission</div><div class="inv-tot-v accent">${money(t.commissionValue)}</div></div>`);
+  if (t.cost !== undefined) chips.push(`<div class="inv-tot"><div class="kpi-label">Cost</div><div class="inv-tot-v">${money(t.cost)}</div></div>`);
+  if (t.margin !== undefined) chips.push(`<div class="inv-tot"><div class="kpi-label">Margin</div><div class="inv-tot-v teal">${money(t.margin)}</div></div>`);
+
+  let proofHtml = d.proof
+    ? `<img class="inv-proof-img" src="${d.proof.url}" alt="invoice proof"><div class="page-sub" style="margin-top:6px;">Uploaded ${d.proof.uploadedAt.slice(0,10)}</div>`
+    : `<div class="inv-proof-empty">No proof of invoice uploaded yet.</div>`;
+  if (d.canUpload) proofHtml += `<div style="margin-top:12px;">
+      <input type="file" id="proofFile" accept="image/*">
+      <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="uploadProof('${reserve.replace(/'/g,"\\'")}')">${d.proof?"Replace":"Upload"} proof</button>
+      <div id="proofMsg" class="page-sub" style="margin-top:6px;"></div></div>`;
+
+  $("#invDetail").innerHTML = `
+    <div class="inv-head">
+      <div class="inv-eyebrow">Reserve no.</div>
+      <div class="inv-reserve">${esc(d.reserve)}</div>
+      <div class="inv-headmeta">${d.date || "—"} · ${esc(d.clients.join(", ")) || "—"} · ${t.count} item${t.count>1?"s":""}</div>
+    </div>
+    <div class="inv-body">
+      <div class="inv-items">
+        <div class="inv-tots">${chips.join("")}</div>
+        <div class="table-wrap" style="border:1px solid var(--border); border-radius:var(--r-lg);"><table>${head}${body}</table></div>
+      </div>
+      <div class="inv-proof">
+        <div class="section-heading">Proof of invoice</div>
+        ${proofHtml}
+      </div>
+    </div>`;
+}
+
+async function uploadProof(reserve) {
+  const f = $("#proofFile").files[0];
+  if (!f) { $("#proofMsg").textContent = "Choose an image first."; return; }
+  const fd = new FormData(); fd.append("file", f); fd.append("partner", partnerSlug); fd.append("reserve", reserve);
+  $("#proofMsg").textContent = "Uploading…";
+  const r = await (await fetch("/api/invoice-proof", { method:"POST", body: fd })).json();
+  if (r.ok) { await openInvoice(reserve); loadInvoices(); }
+  else $("#proofMsg").textContent = "Failed: " + (r.error || "unknown");
 }
 
 // ── owner / admin portfolio ──────────────────────────────

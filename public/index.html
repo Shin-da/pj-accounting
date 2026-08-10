@@ -47,6 +47,7 @@
         <button class="nav-item" data-page="register"><span class="ni">▤</span> Sales register <span class="n-count" id="ncRows"></span></button>
         <button class="nav-item" data-page="clients"><span class="ni">◔</span> By client <span class="n-count" id="ncClients"></span></button>
         <button class="nav-item" data-page="types"><span class="ni">◇</span> By item type <span class="n-count" id="ncTypes"></span></button>
+        <button class="nav-item" data-page="invoices"><span class="ni">▧</span> Invoices <span class="n-count" id="ncInvoices"></span></button>
       </div>
       <div class="sidebar-section" id="adminNav" hidden>
         <div class="sidebar-label">Management</div>
@@ -105,6 +106,15 @@
       </section>
       <section class="page" id="page-clients"><div class="table-wrap"><table id="tblClients"></table></div></section>
       <section class="page" id="page-types"><div class="table-wrap"><table id="tblTypes"></table></div></section>
+
+      <section class="page" id="page-invoices">
+        <div class="inv-layout">
+          <div class="inv-list" id="invList"></div>
+          <div class="inv-detail" id="invDetail">
+            <div class="empty-state"><div class="empty-icon">▧</div><div class="empty-text">Select an invoice on the left to see its breakdown.</div></div>
+          </div>
+        </div>
+      </section>
 
       <section class="page" id="page-portfolio">
         <div class="overview-body">

@@ -28,6 +28,8 @@ module.exports = {
   DATASETS_DIR: path.join(DATA_DIR, "datasets"),         // one JSON per partner
   USERS_JSON: path.join(DATA_DIR, "users.json"),
   PARTNERS_JSON: path.join(DATA_DIR, "partners.json"),
+  PROOFS_DIR: path.join(DATA_DIR, "proofs"),           // uploaded invoice images
+  PROOFS_JSON: path.join(DATA_DIR, "proofs.json"),      // reserve -> image index
   AUTH_SECRET: resolveSecret(),
   SESSION_TTL_MS: 1000 * 60 * 60 * 24 * 14,              // 14 days
   CURRENCY: "₱",

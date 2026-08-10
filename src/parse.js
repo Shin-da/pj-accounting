@@ -185,4 +185,29 @@ function aggregate(records, { from, to } = {}) {
   return { kpi, clients, types, commTypes, months, rows };
 }
 
-module.exports = { parseWorkbookBuffer, aggregate };
+// Group line items into invoices, keyed by reserve no. Newest first.
+function groupInvoices(records, { from, to } = {}) {
+  const rows = records.filter((r) => {
+    if (from && (!r.date || r.date < from)) return false;
+    if (to && (!r.date || r.date > to)) return false;
+    return true;
+  });
+  const map = new Map();
+  for (const r of rows) {
+    const k = r.invoice || "(no reserve)";
+    let inv = map.get(k);
+    if (!inv) { inv = { reserve: k, date: r.date, clients: new Set(), items: [], amount: 0, commissionValue: 0, cost: 0, weight: 0 }; map.set(k, inv); }
+    inv.items.push(r);
+    if (r.client) inv.clients.add(r.client);
+    if (r.date && (!inv.date || r.date < inv.date)) inv.date = r.date;
+    inv.amount += r.amount;
+    inv.commissionValue += r.commissionValue;
+    inv.cost += (r.supplierPrice || (r.weight * r.capitalPerGram));
+    inv.weight += r.weight;
+  }
+  return [...map.values()]
+    .map((inv) => ({ ...inv, clients: [...inv.clients], count: inv.items.length, margin: inv.amount - inv.cost }))
+    .sort((a, b) => (b.date || "").localeCompare(a.date || "") || a.reserve.localeCompare(b.reserve));
+}
+
+module.exports = { parseWorkbookBuffer, aggregate, groupInvoices };

@@ -14,9 +14,10 @@ const express = require("express");
 const multer = require("multer");
 
 const { PORT, CURRENCY, COLUMN_ALIASES } = require("../config");
-const { parseWorkbookBuffer, aggregate } = require("./parse");
+const { parseWorkbookBuffer, aggregate, groupInvoices } = require("./parse");
 const auth = require("./auth");
 const partners = require("./partners");
+const proofs = require("./proofs");
 
 // Boot-time setup: seed the first admin, migrate any existing dataset to RDR.
 auth.seedIfEmpty("jeffmathewg@gmail.com");
@@ -24,6 +25,7 @@ partners.migrateIfNeeded();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
+const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024 } });
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: false }));
 app.use(auth.attachUser);
@@ -133,6 +135,80 @@ app.get("/api/report", auth.requireAuth, (req, res) => {
     meta: ds.meta, flags, typeDimension: dimension,
     ...scope(agg, flags, dimension),
   });
+});
+
+// ── invoices ─────────────────────────────────────────────
+// Field-scoped copies for a partner's visibility flags.
+function scopeItem(r, flags) {
+  const o = { reserve: r.invoice, date: r.date, client: r.client, supplier: r.supplier,
+    itemType: r.itemType, pjCode: r.pjCode, itemCode: r.itemCode, weight: r.weight, amount: r.amount };
+  if (flags.cost) { o.supplierPrice = r.supplierPrice; o.capitalPerGram = r.capitalPerGram; }
+  if (flags.commission) o.commissionValue = r.commissionValue;
+  return o;
+}
+function scopeInvoice(inv, flags, hasProof) {
+  const o = { reserve: inv.reserve, date: inv.date, clients: inv.clients, count: inv.count,
+    amount: inv.amount, weight: inv.weight, hasProof };
+  if (flags.commission) o.commissionValue = inv.commissionValue;
+  if (flags.cost) o.cost = inv.cost;
+  if (flags.margin) o.margin = inv.margin;
+  return o;
+}
+
+// List of invoices (scoped) for the current viewer's partner.
+app.get("/api/invoices", auth.requireAuth, (req, res) => {
+  const partner = resolvePartner(req);
+  if (!partner) return res.json({ invoices: [] });
+  const ds = partners.loadDataset(partner.slug);
+  const flags = effectiveFlags(req.user, partner);
+  const pset = proofs.proofSet(partner.slug);
+  const invoices = groupInvoices(ds.records, { from: req.query.from, to: req.query.to })
+    .map((inv) => scopeInvoice(inv, flags, pset.has(inv.reserve)));
+  res.json({ partner: { slug: partner.slug, name: partner.name }, currency: CURRENCY, flags, invoices });
+});
+
+// One invoice's detail (line items + totals + proof), scoped.
+app.get("/api/invoice", auth.requireAuth, (req, res) => {
+  const partner = resolvePartner(req);
+  if (!partner) return res.status(404).json({ error: "no partner" });
+  const reserve = String(req.query.reserve || "");
+  const ds = partners.loadDataset(partner.slug);
+  const flags = effectiveFlags(req.user, partner);
+  const inv = groupInvoices(ds.records).find((i) => i.reserve === reserve);
+  if (!inv) return res.status(404).json({ error: "invoice not found" });
+  const proof = proofs.getProof(partner.slug, reserve);
+  res.json({
+    currency: CURRENCY, partner: { slug: partner.slug, name: partner.name }, flags,
+    reserve, date: inv.date, clients: inv.clients,
+    totals: scopeInvoice(inv, flags, !!proof),
+    items: inv.items.map((r) => scopeItem(r, flags)),
+    proof: proof ? { url: `/api/invoice-proof?partner=${partner.slug}&reserve=${encodeURIComponent(reserve)}&t=${Date.now()}`, uploadedAt: proof.uploadedAt } : null,
+    canUpload: req.user.role === "admin",
+  });
+});
+
+// Admin uploads a proof image for one invoice.
+app.post("/api/invoice-proof", auth.requireRole("admin"), imageUpload.single("file"), (req, res) => {
+  const partner = partners.getPartner((req.body && req.body.partner) || "");
+  const reserve = req.body && req.body.reserve;
+  if (!partner) return res.status(400).json({ error: "unknown partner" });
+  if (!reserve) return res.status(400).json({ error: "reserve required" });
+  if (!req.file) return res.status(400).json({ error: "no image uploaded" });
+  try {
+    const rec = proofs.setProof(partner.slug, reserve, req.file.buffer, req.file.mimetype);
+    res.json({ ok: true, uploadedAt: rec.uploadedAt });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Serve a proof image (auth; partners only their own).
+app.get("/api/invoice-proof", auth.requireAuth, (req, res) => {
+  const slug = req.query.partner, reserve = req.query.reserve;
+  if (req.user.role === "partner" && slug !== req.user.partner) return res.status(403).end();
+  const proof = proofs.getProof(slug, reserve);
+  if (!proof) return res.status(404).end();
+  res.setHeader("Content-Type", proof.mime);
+  res.setHeader("Cache-Control", "private, max-age=60");
+  fs.createReadStream(proof.abs).pipe(res);
 });
 
 // ── owner portfolio (admin + owner) ──────────────────────
