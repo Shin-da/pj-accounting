@@ -1,8 +1,8 @@
-# Render deploy config for the RDR report.
+# Render deploy config for Perfect Jewel accounting (pj-accounting).
 # On Render: New → Blueprint → point at this repo, and it reads this file.
 services:
   - type: web
-    name: rdr-report
+    name: pj-accounting
     runtime: node
     plan: free
     buildCommand: npm install

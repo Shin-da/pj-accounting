@@ -106,7 +106,7 @@ async function load() {
 function renderKPIs() {
   const k = CURRENT.kpi, cards = [];
   cards.push({ label: "Total sales", value: money(k.amount), cls: "", sub: `${k.lines.toLocaleString()} line items` });
-  if (k.commissionValue !== undefined) cards.push({ label: "RDR commission", value: money(k.commissionValue), cls: "accent",
+  if (k.commissionValue !== undefined) cards.push({ label: "Commission", value: money(k.commissionValue), cls: "accent",
     sub: k.commissionValue ? `${(k.commissionValue/k.amount*100).toFixed(1)}% of sales` : "not filled in yet" });
   cards.push({ label: "Invoices", value: k.invoices.toLocaleString(), cls: "", sub: `${k.clients} clients` });
   if (k.cost !== undefined) cards.push({ label: "Supplier cost", value: money(k.cost), cls: "", sub: "capital / cost basis" });
@@ -122,7 +122,7 @@ function renderCharts() {
   const hasComm = CURRENT.kpi.commissionValue !== undefined;
   const m = CURRENT.months;
   const ds = [{ label: "Sales", data: m.map(x=>x.amount), borderColor: ACCENT, backgroundColor: "rgba(79,70,229,.12)", fill: true, tension: .35, borderWidth: 2, pointRadius: 2, yAxisID: "y" }];
-  if (hasComm) ds.push({ label: "RDR commission", data: m.map(x=>x.commissionValue||0), borderColor: TEAL, backgroundColor: "rgba(13,148,136,.10)", fill: true, tension: .35, borderWidth: 2, pointRadius: 2, yAxisID: "y1" });
+  if (hasComm) ds.push({ label: "Commission", data: m.map(x=>x.commissionValue||0), borderColor: TEAL, backgroundColor: "rgba(13,148,136,.10)", fill: true, tension: .35, borderWidth: 2, pointRadius: 2, yAxisID: "y1" });
   mk("chTime", { type: "line", data: { labels: m.map(x=>x.month), datasets: ds },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: cssVar("--muted2") } } },
       scales: { x: { ticks:{color:tick}, grid:{color:grid} },
@@ -157,7 +157,7 @@ function renderTables() {
   if ("supplierPrice" in r0) regCols.push(["supplierPrice","Capital","num"]);
   if ("capitalPerGram" in r0) regCols.push(["capitalPerGram","₱/g","num"]);
   regCols.push(["weight","Weight","num"], ["amount","Selling price","num"]);
-  if ("commissionValue" in r0) regCols.push(["commissionValue","RDR commission","num"]);
+  if ("commissionValue" in r0) regCols.push(["commissionValue","Commission","num"]);
   table("#tblRegister", regCols, CURRENT.rows, (r,k,kind) => kind==="num" ? (k==="weight" ? (r[k]?grams(r[k]):"—") : (r[k]?money(r[k]):"—")) : esc(r[k]));
 
   const c0 = CURRENT.clients[0] || {};
@@ -191,7 +191,7 @@ async function loadPortfolio() {
   const g = d.grand;
   const cards = [
     { label: "Total sales (all partners)", value: money(g.amount), cls: "" },
-    { label: "RDR + partner commission", value: money(g.commissionValue), cls: "accent" },
+    { label: "Total commission", value: money(g.commissionValue), cls: "accent" },
     { label: "ONELIVE profit", value: money(g.onelive), cls: "teal" },
     { label: "Gross margin", value: money(g.margin), cls: "" },
     { label: "Invoices", value: g.invoices.toLocaleString(), cls: "" },

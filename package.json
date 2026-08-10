@@ -1,8 +1,8 @@
 {
-  "name": "rdr-report",
+  "name": "pj-accounting",
   "version": "0.1.0",
   "private": true,
-  "description": "RDR sales & commission report — view-only dashboard fed by an Excel upload.",
+  "description": "Perfect Jewel partner sales & commission accounting — multi-user, role-scoped dashboards fed by Excel uploads.",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js"

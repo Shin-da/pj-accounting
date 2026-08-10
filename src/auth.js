@@ -14,7 +14,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const { USERS_JSON, AUTH_SECRET, SESSION_TTL_MS } = require("../config");
 
-const COOKIE = "rdr_sess";
+const COOKIE = "pj_sess";
 const ROLES = ["admin", "owner", "partner"];
 
 // ── persistence ──────────────────────────────────────────

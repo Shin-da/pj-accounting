@@ -1,16 +1,18 @@
-# RDR Sales & Commission Report
+# Perfect Jewel — Partner Sales & Accounting (pj-accounting)
 
-A **view-only dashboard** of RDR's sales and commission, fed by an Excel upload — built to hand a link to RDR's CEO, Reymond "RDR" delos Reyes. Headline numbers, charts, and the full sales register, all from the uploaded sheet.
+A multi-user accounting dashboard for Perfect Jewel's partner sales and commission, fed by Excel uploads. Accounting admins upload each partner's data; partners see only their own report (with admin-controlled visibility); the owner sees a read-only portfolio across all partners. RDR is the first partner.
 
-Node.js + Express + SheetJS (parsing) + Chart.js (charts). Pure JavaScript — no build step, no database yet. The last upload is remembered so the link always shows current numbers.
+Node.js + Express + SheetJS (parsing) + Chart.js (charts). Pure JavaScript — no native build step. Accounts use scrypt-hashed passwords and signed-cookie sessions; data is scoped server-side per role.
 
 ## Run locally
 
 ```
-cd rdr-report
+cd pj-accounting
 npm install
 npm run start
 ```
+
+On first run it seeds one admin account (prints a temporary password to the console) and migrates any existing dataset to the RDR partner.
 
 Open **http://localhost:5055**, click **Upload Excel**, choose the RDR sales file. Anyone who opens the URL sees the dashboard (read-only); only the Upload button changes the data.
 
