@@ -77,7 +77,8 @@ async function boot() {
   $("#partnerSwitchWrap").hidden = me.user.role === "partner" || me.partners.length <= 1;
   if (me.partners[0]) $("#brandSub").textContent = me.partners.find(p=>p.slug===partnerSlug)?.name || "";
   sw.value = partnerSlug;
-  sw.addEventListener("change", () => { partnerSlug = sw.value; $("#brandSub").textContent = me.partners.find(p=>p.slug===partnerSlug)?.name||""; filters.client = ""; $("#fClient").value = ""; refreshAll(); });
+  sw.addEventListener("change", () => { partnerSlug = sw.value; $("#brandSub").textContent = me.partners.find(p=>p.slug===partnerSlug)?.name||""; renderBrandMark(); filters.client = ""; $("#fClient").value = ""; refreshAll(); });
+  renderBrandMark();
 
   if (isAdmin) { fillPartnerSelect("#uploadPartner"); fillPartnerSelect("#nuPartner"); }
   restoreFilters();
@@ -89,6 +90,27 @@ const typeLabel = () => (isCommDim() ? "commission type" : "item type");
 
 function fillPartnerSelect(sel) {
   $(sel).innerHTML = ME.partners.map(p => `<option value="${p.slug}">${esc(p.name)}</option>`).join("");
+}
+
+// Header mark: the selected partner's logo, or their initials as a fallback.
+function initialsOf(name) {
+  return String(name || "").split(/\s+/).filter(Boolean).slice(0, 2)
+    .map(w => w[0]).join("").toUpperCase() || "•";
+}
+function renderBrandMark() {
+  const p = (ME.partners || []).find(x => x.slug === partnerSlug);
+  const mark = $("#brandMark");
+  $("#brandInitials").textContent = initialsOf(p && p.name);
+  const old = mark.querySelector("img"); if (old) old.remove();
+  mark.classList.remove("has-img");
+  if (p && p.hasLogo) {
+    const img = new Image();
+    img.alt = p.name + " logo";
+    img.onload = () => mark.classList.add("has-img");
+    img.onerror = () => img.remove();
+    img.src = `/api/partner-logo?partner=${encodeURIComponent(p.slug)}&t=${Date.now()}`;
+    mark.appendChild(img);
+  }
 }
 
 // ── nav ──────────────────────────────────────────────────
@@ -408,7 +430,21 @@ async function loadPartners() {
     const fileInfo = p.dataset
       ? `<div class="page-sub" style="margin-top:6px;">📄 ${esc(p.dataset.fileName || "unnamed file")} — ${p.dataset.rows.toLocaleString()} rows, uploaded ${p.dataset.uploadedAt.slice(0,10)}<br><span class="mono" style="font-size:11px;">${esc(p.dataset.path)}</span></div>`
       : `<div class="page-sub" style="margin-top:6px;">No file uploaded yet.</div>`;
-    return `<div class="partner-row"><div class="pr-name">${esc(p.name)} <span class="page-sub">/${p.slug}</span></div>
+    const hasLogo = (ME.partners.find(x => x.slug === p.slug) || {}).hasLogo;
+    return `<div class="partner-row">
+      <div class="pr-head">
+        <div class="pr-logo">${hasLogo
+          ? `<img src="/api/partner-logo?partner=${encodeURIComponent(p.slug)}&t=${Date.now()}" alt="">`
+          : `<span>${esc(initialsOf(p.name))}</span>`}</div>
+        <div style="flex:1; min-width:0;">
+          <div class="pr-name">${esc(p.name)} <span class="page-sub">/${p.slug}</span></div>
+          <div class="page-sub">Shown in the header when viewing this partner.</div>
+        </div>
+        <div class="pr-logo-actions">
+          <input type="file" id="logoFile-${p.slug}" accept="image/*">
+          <button class="btn btn-ghost btn-sm" onclick="uploadLogo('${p.slug}')">${hasLogo?"Replace":"Upload"} logo</button>
+        </div>
+      </div>
       ${fileInfo}
       <div class="page-sub" style="margin:8px 0 6px;">What this partner may see:</div>
       <div class="flag-toggles">${cb("commission","Their commission")}${cb("cost","Supplier cost")}${cb("margin","Gross margin")}${cb("onelive","ONELIVE profit")}</div></div>`;
@@ -418,6 +454,16 @@ async function loadPartners() {
     await fetch("/api/partners/" + cb.dataset.slug, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ flags }) });
   }));
 }
+async function uploadLogo(slug) {
+  const f = $("#logoFile-" + slug).files[0];
+  if (!f) { alert("Choose an image first."); return; }
+  const fd = new FormData(); fd.append("file", f); fd.append("partner", slug);
+  const r = await (await fetch("/api/partner-logo", { method: "POST", body: fd })).json();
+  if (!r.ok) { alert("Upload failed: " + (r.error || "unknown")); return; }
+  const me = await (await fetch("/api/me")).json(); ME.partners = me.partners;   // refresh hasLogo
+  renderBrandMark(); loadPartners();
+}
+
 $("#addPartner").addEventListener("click", async () => {
   const name = $("#newPartnerName").value.trim(); if (!name) return;
   await fetch("/api/partners", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ name }) });

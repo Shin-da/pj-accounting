@@ -18,6 +18,7 @@ const { parseWorkbookBuffer, aggregate, groupInvoices } = require("./parse");
 const auth = require("./auth");
 const partners = require("./partners");
 const proofs = require("./proofs");
+const logos = require("./logos");
 
 // Relative, repo-rooted path shown to admins so they know where an upload landed.
 function datasetDisplayPath(slug) { return `data/datasets/${slug}.json`; }
@@ -55,7 +56,7 @@ app.get("/api/me", (req, res) => {
     : all;
   res.json({
     authed: true, user: req.user, currency: CURRENCY,
-    partners: visible.map((p) => ({ slug: p.slug, name: p.name })),
+    partners: visible.map((p) => ({ slug: p.slug, name: p.name, hasLogo: logos.hasLogo(p.slug) })),
     flags: req.user.role === "partner" ? (partners.getPartner(req.user.partner)?.flags || {}) : null,
   });
 });
@@ -291,6 +292,28 @@ app.post("/api/upload", auth.requireRole("admin"), upload.single("file"), (req, 
   } catch (e) {
     res.status(500).json({ error: "could not read file: " + e.message });
   }
+});
+
+// ── partner logo ─────────────────────────────────────────
+// Admin uploads; anyone signed in may view (partners only their own).
+app.post("/api/partner-logo", auth.requireRole("admin"), imageUpload.single("file"), (req, res) => {
+  const partner = partners.getPartner((req.body && req.body.partner) || "");
+  if (!partner) return res.status(400).json({ error: "unknown partner" });
+  if (!req.file) return res.status(400).json({ error: "no image uploaded" });
+  try {
+    const rec = logos.setLogo(partner.slug, req.file.buffer, req.file.mimetype);
+    res.json({ ok: true, uploadedAt: rec.uploadedAt });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.get("/api/partner-logo", auth.requireAuth, (req, res) => {
+  const slug = String(req.query.partner || "");
+  if (req.user.role === "partner" && slug !== req.user.partner) return res.status(403).end();
+  const logo = logos.getLogo(slug);
+  if (!logo) return res.status(404).end();
+  res.setHeader("Content-Type", logo.mime);
+  res.setHeader("Cache-Control", "private, max-age=300");
+  fs.createReadStream(logo.abs).pipe(res);
 });
 
 // ── partner management (admin write, owner read) ─────────

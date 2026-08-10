@@ -3131,3 +3131,16 @@ td.rownum, th.rownum { color: var(--muted2); font-family: var(--mono); font-size
 /* filter bar search + totals row */
 .fbar-q { width: 230px; margin: 0; padding: 6px 10px; }
 tfoot td { position: sticky; bottom: 0; background: var(--surface2); border-top: 2px solid var(--border2); font-variant-numeric: tabular-nums; color: var(--text); padding: 10px 14px; white-space: nowrap; }
+
+/* brand mark: partner logo or initials */
+.logo-mark { overflow: hidden; }
+.logo-mark img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.logo-mark.has-img { background: transparent; box-shadow: none; }
+.logo-mark.has-img #brandInitials { display: none; }
+
+/* partner rows on the admin page */
+.pr-head { display: flex; align-items: center; gap: 12px; }
+.pr-logo { width: 44px; height: 44px; flex-shrink: 0; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--bg); display: flex; align-items: center; justify-content: center; overflow: hidden; font-weight: 700; font-size: 13px; color: var(--muted); }
+.pr-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.pr-logo-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pr-logo-actions input[type=file] { font-size: 11.5px; max-width: 190px; color: var(--muted); }
