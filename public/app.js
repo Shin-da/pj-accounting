@@ -4,7 +4,7 @@ let CUR = "₱", ME = null, period = "all", CURRENT = null, partnerSlug = "";
 const charts = {};
 
 const esc = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-const money = (n) => CUR + Math.round(n || 0).toLocaleString();
+const money = (n) => CUR + (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const grams = (n) => (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 }) + " g";
 // commission rate: 0.05 -> "5%", 50 -> "₱50/g"
 const fmtRate = (v) => { const n = parseFloat(v); if (isNaN(n)) return v || "—"; return n > 0 && n < 1 ? (+(n*100).toFixed(2)) + "%" : "₱" + n + "/g"; };
