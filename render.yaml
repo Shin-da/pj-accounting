@@ -1,0 +1,24 @@
+# Render deploy config for the RDR report.
+# On Render: New → Blueprint → point at this repo, and it reads this file.
+services:
+  - type: web
+    name: rdr-report
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      # Stable secret so login sessions survive restarts (Render generates it once).
+      - key: AUTH_SECRET
+        generateValue: true
+      - key: NODE_VERSION
+        value: "20"
+    # NOTE: the free plan has NO persistent disk, so uploaded data + accounts
+    # reset on each redeploy (the admin is re-seeded — watch the deploy logs for
+    # the temp password — and you re-upload the Excel). To keep data across
+    # deploys, add a paid persistent disk mounted at ./data:
+    #
+    # disk:
+    #   name: rdr-data
+    #   mountPath: /opt/render/project/src/data
+    #   sizeGB: 1

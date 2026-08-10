@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RDR — Sales &amp; Commission Report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <div class="logo-zone">
+      <div class="logo-mark">RDR</div>
+      <div>
+        <div class="logo-text">Sales &amp; Commission</div>
+        <div class="logo-sub" id="brandSub">Reymond “RDR” delos Reyes</div>
+      </div>
+    </div>
+    <div class="header-body">
+      <label class="range-inline" id="partnerSwitchWrap" hidden>
+        Partner
+        <select id="partnerSwitch" class="filter-select"></select>
+      </label>
+      <span class="company-badge" id="roleBadge" hidden><span class="company-badge-dot"></span> <span id="roleText"></span></span>
+    </div>
+    <div class="header-right">
+      <button class="btn btn-ghost btn-sm" id="themeToggle" title="Toggle light / dark">◐</button>
+      <button class="btn btn-primary btn-sm" id="uploadBtn" hidden>Upload Excel</button>
+      <div style="position:relative;">
+        <button class="btn btn-ghost btn-sm" id="userBtn">Account ▾</button>
+        <div id="userMenu" class="usermenu" hidden>
+          <div class="um-head"><div id="umName" class="um-name"></div><div id="umEmail" class="page-sub"></div></div>
+          <button class="um-item" id="miChangePw">Change password</button>
+          <button class="um-item" id="miLogout">Sign out</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="app">
+    <aside>
+      <div class="sidebar-section">
+        <div class="sidebar-label">Report</div>
+        <button class="nav-item active" data-page="overview"><span class="ni">▦</span> Overview</button>
+        <button class="nav-item" data-page="register"><span class="ni">▤</span> Sales register <span class="n-count" id="ncRows"></span></button>
+        <button class="nav-item" data-page="clients"><span class="ni">◔</span> By client <span class="n-count" id="ncClients"></span></button>
+        <button class="nav-item" data-page="types"><span class="ni">◇</span> By item type <span class="n-count" id="ncTypes"></span></button>
+      </div>
+      <div class="sidebar-section" id="adminNav" hidden>
+        <div class="sidebar-label">Management</div>
+        <button class="nav-item" data-page="portfolio"><span class="ni">◫</span> Portfolio</button>
+        <button class="nav-item" data-page="partners" data-admin><span class="ni">◑</span> Partners</button>
+        <button class="nav-item" data-page="users" data-admin><span class="ni">◐</span> Users</button>
+      </div>
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-footer"><div class="sidebar-footer-label" id="updatedFoot">—</div></div>
+    </aside>
+
+    <main id="main">
+      <div class="filter-bar" id="filterBar" hidden>
+        <div class="seg" id="periodSeg">
+          <button class="seg-btn active" data-p="all">All time</button>
+          <button class="seg-btn" data-p="ytd">YTD</button>
+          <button class="seg-btn" data-p="quarter">Quarter</button>
+          <button class="seg-btn" data-p="month">Month</button>
+          <button class="seg-btn" data-p="custom">Custom</button>
+        </div>
+        <div class="range-inline" id="customRange" hidden>From <input type="date" id="from"> To <input type="date" id="to"></div>
+        <div class="filter-spacer" style="flex:1"></div>
+        <button class="btn btn-ghost btn-sm" onclick="window.print()">Print / PDF</button>
+        <button class="btn btn-ghost btn-sm" onclick="downloadCSV()">Download CSV</button>
+      </div>
+
+      <section class="page active" id="page-overview">
+        <div class="overview-body">
+          <div id="emptyState" class="empty-state" hidden>
+            <div class="empty-icon">＋</div>
+            <div class="empty-text" id="emptyText">No report loaded yet.</div>
+            <button class="btn btn-primary" id="emptyUpload" hidden onclick="openUpload()">Upload Excel</button>
+          </div>
+          <div id="overviewContent" hidden>
+            <div class="section-heading">Summary</div>
+            <div class="kpi-grid" id="kpis"></div>
+            <div class="section-heading">Trends</div>
+            <div class="chart-stack">
+              <div class="trend-card wide">
+                <div class="trend-card-title">Sales &amp; RDR commission over time</div>
+                <div class="trend-chart-wrap tall"><canvas id="chTime"></canvas></div>
+              </div>
+              <div class="chart-3">
+                <div class="trend-card"><div class="trend-card-title">Sales by item type</div><div class="trend-chart-wrap tall"><canvas id="chType"></canvas></div></div>
+                <div class="trend-card"><div class="trend-card-title">Top clients by sales</div><div class="trend-chart-wrap tall"><canvas id="chClient"></canvas></div></div>
+                <div class="trend-card" id="commCard"><div class="trend-card-title">RDR commission by client</div><div class="trend-chart-wrap tall"><canvas id="chComm"></canvas></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="page-register">
+        <div class="table-note">swipe sideways for the rest of the columns →</div>
+        <div class="table-wrap"><table id="tblRegister"></table></div>
+      </section>
+      <section class="page" id="page-clients"><div class="table-wrap"><table id="tblClients"></table></div></section>
+      <section class="page" id="page-types"><div class="table-wrap"><table id="tblTypes"></table></div></section>
+
+      <section class="page" id="page-portfolio">
+        <div class="overview-body">
+          <div class="section-heading">All partners</div>
+          <div class="kpi-grid" id="pfKpis"></div>
+          <div class="trend-card wide" style="margin-bottom:14px;"><div class="trend-card-title">Sales by partner</div><div class="trend-chart-wrap tall"><canvas id="chPartners"></canvas></div></div>
+          <div class="table-wrap" style="border:1px solid var(--border); border-radius:var(--r-lg);"><table id="tblPortfolio"></table></div>
+        </div>
+      </section>
+
+      <section class="page" id="page-partners">
+        <div class="overview-body">
+          <div class="section-heading">Partners &amp; what they can see</div>
+          <div id="partnersList"></div>
+          <div class="kpi-card" style="margin-top:16px; max-width:520px;">
+            <div class="kpi-label">Add a partner</div>
+            <input class="keyin" id="newPartnerName" placeholder="Partner name (e.g. Golden Star)" style="margin-top:10px;">
+            <button class="btn btn-primary btn-sm" id="addPartner" style="margin-top:8px;">Create partner</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="page-users">
+        <div class="overview-body">
+          <div class="section-heading">Users</div>
+          <div class="table-wrap" style="border:1px solid var(--border); border-radius:var(--r-lg); margin-bottom:18px;"><table id="tblUsers"></table></div>
+          <div class="kpi-card" style="max-width:560px;">
+            <div class="kpi-label">Add a user</div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;">
+              <input class="keyin" id="nuName" placeholder="Name" style="margin:0;">
+              <input class="keyin" id="nuEmail" placeholder="Email" style="margin:0;">
+              <select class="filter-select" id="nuRole"><option value="partner">Partner</option><option value="admin">Accounting admin</option><option value="owner">Owner</option></select>
+              <select class="filter-select" id="nuPartner"></select>
+              <input class="keyin" id="nuPass" placeholder="Temporary password" style="margin:0; grid-column:1 / -1;">
+            </div>
+            <button class="btn btn-primary btn-sm" id="addUser" style="margin-top:10px;">Create user</button>
+            <div id="userMsg" class="page-sub" style="margin-top:8px;"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Upload modal -->
+  <div id="ovl" class="ovl" onclick="closeModals()"></div>
+  <div id="modal" class="modal">
+    <h3>Upload sales Excel</h3>
+    <p class="page-sub">Choose the partner this file belongs to. The latest upload replaces that partner's data.</p>
+    <label class="kpi-label">Partner</label>
+    <select id="uploadPartner" class="filter-select" style="width:100%; margin:6px 0 12px;"></select>
+    <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+    <div id="uploadMsg" class="page-sub"></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" onclick="closeModals()">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="doUpload">Upload</button>
+    </div>
+  </div>
+
+  <!-- Change password modal -->
+  <div id="pwModal" class="modal">
+    <h3>Change password</h3>
+    <input type="password" id="pwCurrent" class="keyin" placeholder="Current password">
+    <input type="password" id="pwNext" class="keyin" placeholder="New password (min 6)">
+    <div id="pwMsg" class="page-sub"></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" onclick="closeModals()">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="doChangePw">Update</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

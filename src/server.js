@@ -1,0 +1,209 @@
+/*
+ * RDR report server — now multi-user.
+ *
+ * Roles: admin (upload + manage users/partners + see all), owner (read-only
+ * portfolio across all partners incl. PJ profit), partner (own report only,
+ * filtered by that partner's visibility flags).
+ *
+ * Data is scoped SERVER-SIDE: a partner can never pull another partner's data
+ * or a hidden field, no matter what the client asks for.
+ */
+const path = require("path");
+const fs = require("fs");
+const express = require("express");
+const multer = require("multer");
+
+const { PORT, CURRENCY, COLUMN_ALIASES } = require("../config");
+const { parseWorkbookBuffer, aggregate } = require("./parse");
+const auth = require("./auth");
+const partners = require("./partners");
+
+// Boot-time setup: seed the first admin, migrate any existing dataset to RDR.
+auth.seedIfEmpty("jeffmathewg@gmail.com");
+partners.migrateIfNeeded();
+
+const app = express();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 * 1024 * 1024 } });
+app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ extended: false }));
+app.use(auth.attachUser);
+app.use(express.static(path.join(__dirname, "..", "public"), {
+  etag: false, lastModified: false,
+  setHeaders: (res) => res.setHeader("Cache-Control", "no-store"),
+}));
+
+// ── auth routes ──────────────────────────────────────────
+app.post("/api/login", (req, res) => {
+  const { email, password } = req.body || {};
+  const u = auth.authenticate(email, password);
+  if (!u) return res.status(401).json({ error: "wrong email or password" });
+  auth.setSession(res, u);
+  res.json({ ok: true, user: auth.publicUser(u) });
+});
+app.post("/api/logout", (req, res) => { auth.clearSession(res); res.json({ ok: true }); });
+
+app.get("/api/me", (req, res) => {
+  if (!req.user) return res.json({ authed: false });
+  const all = partners.listPartners();
+  const visible = req.user.role === "partner"
+    ? all.filter((p) => p.slug === req.user.partner)
+    : all;
+  res.json({
+    authed: true, user: req.user, currency: CURRENCY,
+    partners: visible.map((p) => ({ slug: p.slug, name: p.name })),
+    flags: req.user.role === "partner" ? (partners.getPartner(req.user.partner)?.flags || {}) : null,
+  });
+});
+
+app.post("/api/change-password", auth.requireAuth, (req, res) => {
+  const { current, next } = req.body || {};
+  if (!next || String(next).length < 6) return res.status(400).json({ error: "new password too short (min 6)" });
+  if (!auth.authenticate(req.user.email, current)) return res.status(400).json({ error: "current password is wrong" });
+  auth.setOwnPassword(req.user.id, next);
+  res.json({ ok: true });
+});
+
+// ── scoping helpers ──────────────────────────────────────
+function effectiveFlags(user, partner) {
+  if (user.role === "partner") {
+    const f = (partner && partner.flags) || {};
+    return { commission: !!f.commission, cost: !!f.cost, margin: !!f.margin, onelive: false };
+  }
+  return { commission: true, cost: true, margin: true, onelive: true }; // admin/owner
+}
+
+// Which partner is this viewer allowed to look at?
+function resolvePartner(req) {
+  if (req.user.role === "partner") return partners.getPartner(req.user.partner);
+  const q = req.query.partner;
+  const all = partners.listPartners();
+  return (q && all.find((p) => p.slug === q)) || all[0] || null;
+}
+
+// Remove fields the viewer isn't allowed to see, on a *copy*.
+function scope(agg, flags) {
+  const kpi = { lines: agg.kpi.lines, invoices: agg.kpi.invoices, clients: agg.kpi.clients,
+    amount: agg.kpi.amount, weight: agg.kpi.weight };
+  if (flags.commission) kpi.commissionValue = agg.kpi.commissionValue;
+  if (flags.cost) kpi.cost = agg.kpi.cost;
+  if (flags.margin) kpi.margin = agg.kpi.margin;
+  if (flags.onelive) kpi.onelive = agg.kpi.onelive;
+
+  const clients = agg.clients.map((c) => {
+    const o = { client: c.client, amount: c.amount, invoices: c.invoices };
+    if (flags.commission) o.commissionValue = c.commissionValue;
+    if (flags.cost) o.cost = c.cost;
+    if (flags.margin) o.margin = c.margin;
+    return o;
+  });
+  const types = agg.types.map((t) => {
+    const o = { itemType: t.itemType, amount: t.amount, weight: t.weight, count: t.count };
+    if (flags.commission) o.commissionValue = t.commissionValue;
+    return o;
+  });
+  const months = agg.months.map((m) => {
+    const o = { month: m.month, amount: m.amount };
+    if (flags.commission) o.commissionValue = m.commissionValue;
+    return o;
+  });
+  const rows = agg.rows.slice(0, 5000).map((r) => {
+    const o = { date: r.date, invoice: r.invoice, client: r.client, supplier: r.supplier,
+      itemType: r.itemType, weight: r.weight, amount: r.amount, pjCode: r.pjCode, itemCode: r.itemCode };
+    if (flags.cost) { o.supplierPrice = r.supplierPrice; o.capitalPerGram = r.capitalPerGram; }
+    if (flags.commission) o.commissionValue = r.commissionValue;
+    return o;
+  });
+  return { kpi, clients, types, months, rows, rowsTotal: agg.rows.length };
+}
+
+// ── report (all roles) ───────────────────────────────────
+app.get("/api/report", auth.requireAuth, (req, res) => {
+  const partner = resolvePartner(req);
+  if (!partner) return res.json({ empty: true, reason: "no partner assigned" });
+  const ds = partners.loadDataset(partner.slug);
+  const flags = effectiveFlags(req.user, partner);
+  const agg = aggregate(ds.records, { from: req.query.from, to: req.query.to });
+  res.json({
+    currency: CURRENCY, partner: { slug: partner.slug, name: partner.name },
+    meta: ds.meta, flags,
+    ...scope(agg, flags),
+  });
+});
+
+// ── owner portfolio (admin + owner) ──────────────────────
+app.get("/api/portfolio", auth.requireRole("admin", "owner"), (req, res) => {
+  const { from, to } = req.query;
+  const rows = [];
+  const grand = { amount: 0, commissionValue: 0, cost: 0, margin: 0, onelive: 0, invoices: 0, lines: 0 };
+  for (const p of partners.listPartners()) {
+    const ds = partners.loadDataset(p.slug);
+    const a = aggregate(ds.records, { from, to }).kpi;
+    rows.push({ slug: p.slug, name: p.name, amount: a.amount, commissionValue: a.commissionValue,
+      cost: a.cost, margin: a.margin, onelive: a.onelive, invoices: a.invoices, clients: a.clients,
+      lines: a.lines, uploadedAt: ds.meta ? ds.meta.uploadedAt : null });
+    for (const k of Object.keys(grand)) grand[k] += a[k] || 0;
+  }
+  rows.sort((x, y) => y.amount - x.amount);
+  res.json({ currency: CURRENCY, partners: rows, grand });
+});
+
+// ── upload (admin) ───────────────────────────────────────
+app.post("/api/upload", auth.requireRole("admin"), upload.single("file"), (req, res) => {
+  const slug = (req.body && req.body.partner) || "";
+  const partner = partners.getPartner(slug);
+  if (!partner) return res.status(400).json({ error: "unknown partner — create it first" });
+  if (!req.file) return res.status(400).json({ error: "no file uploaded" });
+  try {
+    const parsed = parseWorkbookBuffer(req.file.buffer);
+    if (!parsed.records.length) return res.status(400).json({ error: parsed.meta.error || "no rows found", meta: parsed.meta });
+    partners.saveDataset(partner.slug, parsed);
+    res.json({ ok: true, partner: partner.slug, meta: parsed.meta });
+  } catch (e) {
+    res.status(500).json({ error: "could not read file: " + e.message });
+  }
+});
+
+// ── partner management (admin write, owner read) ─────────
+app.get("/api/partners", auth.requireRole("admin", "owner"), (req, res) => {
+  res.json({ partners: partners.listPartners() });
+});
+app.post("/api/partners", auth.requireRole("admin"), (req, res) => {
+  try { res.json({ ok: true, partner: partners.createPartner(req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch("/api/partners/:slug", auth.requireRole("admin"), (req, res) => {
+  try { res.json({ ok: true, partner: partners.updatePartner(req.params.slug, req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ── user management (admin) ──────────────────────────────
+app.get("/api/users", auth.requireRole("admin"), (req, res) => res.json({ users: auth.listUsers() }));
+app.post("/api/users", auth.requireRole("admin"), (req, res) => {
+  try { res.json({ ok: true, user: auth.createUser(req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.patch("/api/users/:id", auth.requireRole("admin"), (req, res) => {
+  try { res.json({ ok: true, user: auth.updateUser(req.params.id, req.body || {}) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Try the preferred port, then a few fallbacks, so a leftover copy on 5055
+// doesn't hard-crash the app — it just uses the next free port and says so.
+const CANDIDATE_PORTS = [PORT, 5056, 5065, 5155, 3055, 0];
+function listenOn(i) {
+  if (i >= CANDIDATE_PORTS.length) { console.error("\n ! Could not bind any port.\n"); process.exit(1); }
+  const p = CANDIDATE_PORTS[i];
+  const server = app.listen(p, () => {
+    const actual = server.address().port;
+    console.log(`\n * RDR report on http://localhost:${actual}`);
+    console.log(` * partners: ${partners.listPartners().map((x) => x.slug).join(", ") || "none"}`);
+    if (actual !== PORT) console.log(`\n   (port ${PORT} was busy — using ${actual}; open the URL above)`);
+  });
+  server.on("error", (e) => {
+    if (e.code === "EADDRINUSE") {
+      console.log(` * port ${p} busy, trying another…`);
+      listenOn(i + 1);
+    } else { throw e; }
+  });
+}
+listenOn(0);

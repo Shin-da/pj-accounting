@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in — RDR Report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body style="display:flex; align-items:center; justify-content:center; min-height:100vh;">
+  <div style="width:min(380px,92vw);">
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:22px; justify-content:center;">
+      <div class="logo-mark" style="width:34px;height:34px;">RDR</div>
+      <div>
+        <div class="logo-text" style="font-size:15px;">Sales &amp; Commission</div>
+        <div class="logo-sub">Accounting system</div>
+      </div>
+    </div>
+    <div class="kpi-card" style="padding:26px;">
+      <div class="page-title" style="margin-bottom:4px;">Sign in</div>
+      <div class="page-sub" style="margin-bottom:18px;">Enter your account details.</div>
+      <form id="loginForm">
+        <label class="kpi-label">Email</label>
+        <input class="keyin" type="email" id="email" autocomplete="username" required style="margin-bottom:12px;">
+        <label class="kpi-label">Password</label>
+        <input class="keyin" type="password" id="password" autocomplete="current-password" required>
+        <div id="msg" class="page-sub" style="color:var(--danger); margin:10px 0 0; min-height:16px;"></div>
+        <button class="btn btn-primary" type="submit" style="width:100%; justify-content:center; margin-top:16px;">Sign in</button>
+      </form>
+    </div>
+    <div class="page-sub" style="text-align:center; margin-top:16px;">Perfect Jewel · RDR</div>
+  </div>
+  <script>
+    const $ = (s) => document.querySelector(s);
+    $("#loginForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      $("#msg").textContent = "";
+      const r = await fetch("/api/login", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: $("#email").value.trim(), password: $("#password").value }),
+      });
+      const d = await r.json();
+      if (d.ok) window.location = "/";
+      else $("#msg").textContent = d.error || "Sign in failed.";
+    });
+  </script>
+</body>
+</html>
