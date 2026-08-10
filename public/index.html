@@ -69,6 +69,10 @@
           <button class="seg-btn" data-p="custom">Custom</button>
         </div>
         <div class="range-inline" id="customRange" hidden>From <input type="date" id="from"> To <input type="date" id="to"></div>
+        <input type="search" id="fq" class="keyin fbar-q" placeholder="Search invoice, client, PJ code…">
+        <select id="fCommType" class="filter-select"><option value="">All comm. types</option><option value="Gold">Gold</option><option value="Jewelry">Jewelry</option></select>
+        <select id="fClient" class="filter-select"><option value="">All clients</option></select>
+        <button class="btn btn-ghost btn-sm" id="fClear" hidden>Clear filters</button>
         <div class="filter-spacer" style="flex:1"></div>
         <button class="btn btn-ghost btn-sm" onclick="window.print()">Print / PDF</button>
         <button class="btn btn-ghost btn-sm" onclick="downloadCSV()">Download CSV</button>

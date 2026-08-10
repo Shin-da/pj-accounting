@@ -2,6 +2,40 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 let CUR = "₱", ME = null, period = "all", CURRENT = null, partnerSlug = "";
 const charts = {};
+// Global filters — shared by Overview, register, breakdowns and invoices,
+// and persisted so they survive reloads and page switches.
+let filters = { q: "", commType: "", client: "" };
+function saveFilters() {
+  try { localStorage.setItem("pj-filters", JSON.stringify({ period, from: $("#from").value, to: $("#to").value, ...filters })); } catch (_) {}
+}
+function restoreFilters() {
+  try {
+    const s = JSON.parse(localStorage.getItem("pj-filters") || "{}");
+    if (s.period) period = s.period;
+    if (s.from) $("#from").value = s.from;
+    if (s.to) $("#to").value = s.to;
+    filters.q = s.q || ""; filters.commType = s.commType || ""; filters.client = s.client || "";
+    $("#fq").value = filters.q; $("#fCommType").value = filters.commType;
+    document.querySelectorAll(".seg-btn").forEach(b => b.classList.toggle("active", b.dataset.p === period));
+    $("#customRange").hidden = period !== "custom";
+  } catch (_) {}
+}
+function filterQS() {
+  const qs = new URLSearchParams();
+  if (partnerSlug) qs.set("partner", partnerSlug);
+  const { from, to } = periodRange();
+  if (from) qs.set("from", from); if (to) qs.set("to", to);
+  if (filters.q) qs.set("q", filters.q);
+  if (filters.commType) qs.set("commType", filters.commType);
+  if (filters.client) qs.set("client", filters.client);
+  return qs;
+}
+function refreshAll() {
+  saveFilters();
+  $("#fClear").hidden = !(filters.q || filters.commType || filters.client);
+  load();
+  if (document.querySelector("#page-invoices.active")) loadInvoices();
+}
 
 const esc = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const money = (n) => CUR + (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -43,10 +77,11 @@ async function boot() {
   $("#partnerSwitchWrap").hidden = me.user.role === "partner" || me.partners.length <= 1;
   if (me.partners[0]) $("#brandSub").textContent = me.partners.find(p=>p.slug===partnerSlug)?.name || "";
   sw.value = partnerSlug;
-  sw.addEventListener("change", () => { partnerSlug = sw.value; $("#brandSub").textContent = me.partners.find(p=>p.slug===partnerSlug)?.name||""; load(); });
+  sw.addEventListener("change", () => { partnerSlug = sw.value; $("#brandSub").textContent = me.partners.find(p=>p.slug===partnerSlug)?.name||""; filters.client = ""; $("#fClient").value = ""; refreshAll(); });
 
   if (isAdmin) { fillPartnerSelect("#uploadPartner"); fillPartnerSelect("#nuPartner"); }
-  load();
+  restoreFilters();
+  refreshAll();
 }
 
 const isCommDim = () => CURRENT && CURRENT.typeDimension === "commission";
@@ -62,7 +97,7 @@ $$(".nav-item").forEach(b => b.addEventListener("click", () => {
   b.classList.add("active");
   $$(".page").forEach(p => p.classList.remove("active"));
   $("#page-" + b.dataset.page).classList.add("active");
-  const rep = ["overview","register","clients","types"].includes(b.dataset.page);
+  const rep = ["overview","register","clients","types","invoices"].includes(b.dataset.page);
   $("#filterBar").hidden = !rep || !CURRENT;
   if (b.dataset.page === "portfolio") loadPortfolio();
   if (b.dataset.page === "partners") loadPartners();
@@ -70,15 +105,27 @@ $$(".nav-item").forEach(b => b.addEventListener("click", () => {
   if (b.dataset.page === "invoices") loadInvoices();
 }));
 
-// ── period ───────────────────────────────────────────────
+// ── period + filters ─────────────────────────────────────
 $("#periodSeg").addEventListener("click", (e) => {
   const b = e.target.closest(".seg-btn"); if (!b) return;
   $$(".seg-btn").forEach(x => x.classList.remove("active")); b.classList.add("active");
   period = b.dataset.p; $("#customRange").hidden = period !== "custom";
-  if (period !== "custom") load();
+  if (period !== "custom") refreshAll();
 });
-$("#from").addEventListener("change", load);
-$("#to").addEventListener("change", load);
+$("#from").addEventListener("change", refreshAll);
+$("#to").addEventListener("change", refreshAll);
+let fqTimer;
+$("#fq").addEventListener("input", () => {
+  clearTimeout(fqTimer);
+  fqTimer = setTimeout(() => { filters.q = $("#fq").value.trim(); refreshAll(); }, 250);
+});
+$("#fCommType").addEventListener("change", () => { filters.commType = $("#fCommType").value; refreshAll(); });
+$("#fClient").addEventListener("change", () => { filters.client = $("#fClient").value; refreshAll(); });
+$("#fClear").addEventListener("click", () => {
+  filters = { q: "", commType: "", client: "" };
+  $("#fq").value = ""; $("#fCommType").value = ""; $("#fClient").value = "";
+  refreshAll();
+});
 function periodRange() {
   const now = new Date(), y = now.getFullYear(), iso = (d) => d.toISOString().slice(0,10);
   if (period === "ytd") return { from: `${y}-01-01`, to: iso(now) };
@@ -90,10 +137,7 @@ function periodRange() {
 
 // ── report ───────────────────────────────────────────────
 async function load() {
-  const { from, to } = periodRange();
-  const qs = new URLSearchParams(); if (partnerSlug) qs.set("partner", partnerSlug);
-  if (from) qs.set("from", from); if (to) qs.set("to", to);
-  const data = await (await fetch("/api/report?" + qs.toString())).json();
+  const data = await (await fetch("/api/report?" + filterQS().toString())).json();
   if (data.empty || !data.meta) {
     CURRENT = null; $("#overviewContent").hidden = true; $("#filterBar").hidden = true;
     $("#emptyState").hidden = false;
@@ -111,6 +155,13 @@ async function load() {
   $("#ncRows").textContent = data.rowsTotal.toLocaleString();
   $("#ncClients").textContent = data.clients.length;
   $("#ncTypes").textContent = data.types.length;
+  // (Re)populate the client filter from the unfiltered dataset, keeping selection.
+  if (data.filterOptions) {
+    const sel = $("#fClient"), cur = filters.client;
+    sel.innerHTML = `<option value="">All clients</option>` +
+      data.filterOptions.clients.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+    sel.value = cur && data.filterOptions.clients.includes(cur) ? cur : "";
+  }
   renderKPIs(); renderCharts(); renderTables();
 }
 
@@ -158,12 +209,37 @@ function renderCharts() {
 }
 
 // ── tables (columns adapt to what the API returned) ──────
-// cellFn receives (row, key, kind, rowIndex); the special key "__n" renders
-// the 1-based row number.
-function table(el, cols, rows, cellFn) {
-  const head = `<thead><tr>${cols.map(c => `<th class="${c[2]==='num'?'num':''}">${c[1]}</th>`).join("")}</tr></thead>`;
-  const body = `<tbody>${rows.map((r, i) => `<tr>${cols.map(c => `<td class="${c[2]==='num'?'num':''}${c[0]==='__n'?' rownum':''}">${c[0]==="__n" ? (i+1) : cellFn(r,c[0],c[2],i)}</td>`).join("")}</tr>`).join("")}</tbody>`;
-  $(el).innerHTML = head + body;
+// Sortable: click a header to sort asc, again for desc. "__n" renders the
+// 1-based row number (of the sorted view) and isn't sortable.
+const SORT = {};        // el -> { key, dir }
+const TABLE_ARGS = {};  // el -> args, so a header click can re-render
+function smartCompare(av, bv) {
+  const an = typeof av === "number", bn = typeof bv === "number";
+  if (an || bn) return (av || 0) - (bv || 0);
+  const af = parseFloat(av), bf = parseFloat(bv);
+  if (!isNaN(af) && !isNaN(bf)) return af - bf;
+  return String(av ?? "").localeCompare(String(bv ?? ""));
+}
+function table(el, cols, rows, cellFn, foot) {
+  TABLE_ARGS[el] = { cols, rows, cellFn, foot };
+  const st = SORT[el];
+  let view = rows;
+  if (st && st.key) {
+    view = [...rows].sort((a, b) => (st.dir === "desc" ? -1 : 1) * smartCompare(a[st.key], b[st.key]));
+  }
+  const head = `<thead><tr>${cols.map(c => {
+    const sortable = c[0] !== "__n";
+    const cls = [c[2]==="num"?"num":"", st && st.key===c[0] ? (st.dir==="desc"?"sorted-desc":"sorted-asc") : ""].join(" ").trim();
+    return `<th class="${cls}" ${sortable?`data-key="${c[0]}"`:""}>${c[1]}</th>`;
+  }).join("")}</tr></thead>`;
+  const body = `<tbody>${view.map((r, i) => `<tr>${cols.map(c => `<td class="${c[2]==='num'?'num':''}${c[0]==='__n'?' rownum':''}">${c[0]==="__n" ? (i+1) : cellFn(r,c[0],c[2],i)}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  $(el).innerHTML = head + body + (foot || "");
+  $(el).querySelectorAll("th[data-key]").forEach(th => th.addEventListener("click", () => {
+    const k = th.dataset.key, cur = SORT[el] || {};
+    SORT[el] = cur.key === k ? { key: k, dir: cur.dir === "asc" ? "desc" : "asc" } : { key: k, dir: "asc" };
+    const a = TABLE_ARGS[el];
+    table(el, a.cols, a.rows, a.cellFn, a.foot);
+  }));
 }
 function renderTables() {
   const r0 = CURRENT.rows[0] || {};
@@ -182,7 +258,22 @@ function renderTables() {
   regCols.push(["amount","Item amount","num"]);
   if ("commissionRate" in r0) regCols.push(["commissionRate","Comm. rate"]);
   if ("commissionValue" in r0) regCols.push(["commissionValue","Commission amount","num"]);
-  table("#tblRegister", regCols, CURRENT.rows, (r,k,kind) => kind==="num" ? (k==="weight" ? (r[k]?grams(r[k]):"N/A") : (r[k]?money(r[k]):"N/A")) : (k==="commissionRate" ? fmtRate(r[k]) : disp(r[k])));
+
+  // Totals row over the FULL filtered set (server-computed).
+  const T = CURRENT.totals || {};
+  const footCells = regCols.map(([k]) => {
+    if (k === "__n") return `<td class="rownum"></td>`;
+    if (k === "date") return `<td><b>TOTAL</b></td>`;
+    if (k === "invoice") return `<td>${(T.count ?? CURRENT.rowsTotal).toLocaleString()} rows</td>`;
+    if (k === "weight") return `<td class="num"><b>${grams(T.weight || 0)}</b></td>`;
+    if (k === "supplierPrice" && T.supplierPrice !== undefined) return `<td class="num"><b>${money(T.supplierPrice)}</b></td>`;
+    if (k === "amount") return `<td class="num"><b>${money(T.amount || 0)}</b></td>`;
+    if (k === "commissionValue" && T.commissionValue !== undefined) return `<td class="num"><b>${money(T.commissionValue)}</b></td>`;
+    return "<td></td>";
+  });
+  const foot = `<tfoot><tr>${footCells.join("")}</tr></tfoot>`;
+
+  table("#tblRegister", regCols, CURRENT.rows, (r,k,kind) => kind==="num" ? (k==="weight" ? (r[k]?grams(r[k]):"N/A") : (r[k]?money(r[k]):"N/A")) : (k==="commissionRate" ? fmtRate(r[k]) : disp(r[k])), foot);
 
   const c0 = CURRENT.clients[0] || {};
   const clientCols = [["client","Client"],["invoices","Invoices","num"],["amount","Sales","num"]];
@@ -210,8 +301,7 @@ function downloadCSV() {
 // ── invoices ─────────────────────────────────────────────
 let currentInvoice = null;
 async function loadInvoices() {
-  const qs = new URLSearchParams(); if (partnerSlug) qs.set("partner", partnerSlug);
-  const d = await (await fetch("/api/invoices?" + qs)).json();
+  const d = await (await fetch("/api/invoices?" + filterQS().toString())).json();
   $("#ncInvoices").textContent = (d.invoices || []).length;
   if (!d.invoices || !d.invoices.length) { $("#invList").innerHTML = `<div class="page-sub" style="padding:16px;">No invoices for this partner.</div>`; return; }
   $("#invList").innerHTML = d.invoices.map(inv => `

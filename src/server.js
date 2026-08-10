@@ -80,6 +80,25 @@ function effectiveFlags(user, partner) {
 }
 const commLabel = (v) => ({ GOLD: "Gold", JEWELRY: "Jewelry" }[String(v || "").toUpperCase()] || (v ? String(v) : "—"));
 
+// Global row filters (beyond the date window): free-text search, commission
+// type, exact client. Applied server-side so KPIs/charts/tables all agree.
+function applyFilters(records, q, canSeeSupplier) {
+  const text = String(q.q || "").trim().toLowerCase();
+  const ct = String(q.commType || "").trim().toUpperCase();
+  const client = String(q.client || "").trim();
+  if (!text && !ct && !client) return records;
+  return records.filter((r) => {
+    if (client && r.client !== client) return false;
+    if (ct && String(r.commissionType || "").toUpperCase() !== ct) return false;
+    if (text) {
+      const parts = [r.invoice, r.client, r.pjCode, r.itemCode, r.itemType];
+      if (canSeeSupplier) parts.push(r.supplier);   // partners can't probe supplier names
+      if (!parts.join(" ").toLowerCase().includes(text)) return false;
+    }
+    return true;
+  });
+}
+
 // Which partner is this viewer allowed to look at?
 function resolvePartner(req) {
   if (req.user.role === "partner") return partners.getPartner(req.user.partner);
@@ -135,12 +154,30 @@ app.get("/api/report", auth.requireAuth, (req, res) => {
   if (!partner) return res.json({ empty: true, reason: "no partner assigned" });
   const ds = partners.loadDataset(partner.slug);
   const flags = effectiveFlags(req.user, partner);
-  const agg = aggregate(ds.records, { from: req.query.from, to: req.query.to });
+  const filtered = applyFilters(ds.records, req.query, flags.supplier);
+  const agg = aggregate(filtered, { from: req.query.from, to: req.query.to });
   // Everyone breaks down by commission type (Gold/Jewelry), not raw item/SKU type.
   const dimension = "commission";
+
+  // Totals over the FULL filtered set (register shows at most 5000 rows).
+  const totals = { count: agg.rows.length, weight: 0, amount: 0 };
+  if (flags.cost) totals.supplierPrice = 0;
+  if (flags.commission) totals.commissionValue = 0;
+  for (const r of agg.rows) {
+    totals.weight += r.weight; totals.amount += r.amount;
+    if (flags.cost) totals.supplierPrice += r.supplierPrice || 0;
+    if (flags.commission) totals.commissionValue += r.commissionValue || 0;
+  }
+
+  // Options for the filter dropdowns come from the UNfiltered dataset, so
+  // choosing one filter doesn't empty the others' choices.
+  const clientSet = new Set(ds.records.map((r) => r.client).filter(Boolean));
+
   res.json({
     currency: CURRENCY, partner: { slug: partner.slug, name: partner.name },
     meta: ds.meta, flags, typeDimension: dimension,
+    totals,
+    filterOptions: { clients: [...clientSet].sort(), commTypes: ["Gold", "Jewelry"] },
     ...scope(agg, flags, dimension),
   });
 });
@@ -172,7 +209,8 @@ app.get("/api/invoices", auth.requireAuth, (req, res) => {
   const ds = partners.loadDataset(partner.slug);
   const flags = effectiveFlags(req.user, partner);
   const pset = proofs.proofSet(partner.slug);
-  const invoices = groupInvoices(ds.records, { from: req.query.from, to: req.query.to })
+  const filtered = applyFilters(ds.records, req.query, flags.supplier);
+  const invoices = groupInvoices(filtered, { from: req.query.from, to: req.query.to })
     .map((inv) => scopeInvoice(inv, flags, pset.has(inv.reserve)));
   res.json({ partner: { slug: partner.slug, name: partner.name }, currency: CURRENCY, flags, invoices });
 });
