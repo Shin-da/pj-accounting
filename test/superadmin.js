@@ -8,7 +8,7 @@
  *     node test/superadmin.js
  */
 const { newDb } = require('pg-mem');
-const APP = __dirname;
+const APP = require('path').join(__dirname, '..');   // repo root, from test/
 const mem = newDb();
 mem.public.registerFunction({ name:'now', returns:'timestamp', implementation:()=>new Date() });
 const pgAdapter = mem.adapters.createPg();
