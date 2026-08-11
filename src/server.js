@@ -21,6 +21,7 @@ const auth = require("./auth");
 const partners = require("./partners");
 const proofs = require("./proofs");
 const logos = require("./logos");
+const invoices = require("./invoices");
 
 /** Wrap an async handler so a thrown error becomes a 500 instead of a hang. */
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -157,7 +158,8 @@ function scope(agg, flags, dimension) {
   const rows = agg.rows.slice(0, 5000).map((r) => {
     const o = { date: r.date, invoice: r.invoice, client: r.client,
       itemType: r.itemType || "—", commissionType: commLabel(r.commissionType),
-      weight: r.weight, amount: r.amount, pjCode: r.pjCode || "—", itemCode: r.itemCode || "—" };
+      weight: r.weight, amount: r.amount, pjCode: r.pjCode || "—", itemCode: r.itemCode || "—",
+      source: r.source || "import" };
     if (flags.supplier) o.supplier = r.supplier;                       // admin/owner only
     if (flags.cost) { o.supplierPrice = r.supplierPrice; o.capitalPerGram = r.capitalPerGram; }
     if (flags.commission) { o.commissionRate = r.commission; o.commissionValue = r.commissionValue; }
@@ -211,7 +213,7 @@ function scopeItem(r, flags) {
 }
 function scopeInvoice(inv, flags, hasProof) {
   const o = { reserve: inv.reserve, date: inv.date, clients: inv.clients, count: inv.count,
-    amount: inv.amount, weight: inv.weight, hasProof };
+    amount: inv.amount, weight: inv.weight, hasProof, source: inv.source || "import" };
   if (flags.commission) o.commissionValue = inv.commissionValue;
   if (flags.cost) o.cost = inv.cost;
   if (flags.margin) o.margin = inv.margin;
@@ -246,6 +248,8 @@ app.get("/api/invoice", auth.requireAuth, wrap(async (req, res) => {
     items: inv.items.map((r) => scopeItem(r, flags)),
     proof: proof ? { url: `/api/invoice-proof?partner=${partner.slug}&reserve=${encodeURIComponent(reserve)}&t=${Date.now()}`, uploadedAt: proof.uploadedAt } : null,
     canUpload: req.user.role === "admin",
+    source: inv.source || "import",
+    canEdit: req.user.role === "admin" && (inv.source || "import") === "manual",
   });
 }));
 
@@ -300,10 +304,31 @@ app.post("/api/upload", auth.requireRole("admin"), upload.single("file"), wrap(a
       return res.status(400).json({ error: parsed.meta.error || "no rows found", meta: parsed.meta });
     }
     parsed.meta.fileName = req.file.originalname;
+
+    // Warn if the sheet contains invoice numbers that already exist as MANUAL
+    // invoices — otherwise the same invoice would appear twice in the report.
+    const manualNos = await invoices.manualInvoiceNumbers(partner.slug);
+    const collisions = [...new Set(
+      parsed.records.map((r) => r.invoice).filter((n) => n && manualNos.has(n)))];
+
     const saved = await partners.saveDataset(partner.slug, parsed, {
       fileName: req.file.originalname, uploadedBy: req.user.email,
+      fileBytes: req.file.buffer, fileMime: req.file.mimetype,
     });
-    res.json({ ok: true, partner: partner.slug, meta: parsed.meta, rows: saved.rows });
+    await invoices.audit(null, {
+      actor: req.user.email, action: "upload", partnerSlug: partner.slug,
+      entity: req.file.originalname,
+      details: { rows: saved.rows, collisions },
+    });
+    res.json({
+      ok: true, partner: partner.slug, meta: parsed.meta, rows: saved.rows,
+      warnings: collisions.length ? [
+        `${collisions.length} invoice number(s) in this file already exist as manually-created ` +
+        `invoices and now appear twice: ${collisions.slice(0, 5).join(", ")}` +
+        (collisions.length > 5 ? "…" : "") +
+        ". Delete the manual copies, or remove them from the spreadsheet."
+      ] : [],
+    });
   } catch (e) {
     res.status(500).json({ error: "could not read file: " + e.message });
   }
@@ -357,6 +382,61 @@ app.patch("/api/partners/:slug", auth.requireRole("admin"), wrap(async (req, res
 // Upload history — lets a bad upload be identified (and later rolled back).
 app.get("/api/partners/:slug/datasets", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
   res.json({ datasets: await partners.listDatasets(req.params.slug) });
+}));
+
+// ── manual invoices (admin) ──────────────────────────────
+// Created in the app, shown to the partner alongside imported rows, and never
+// touched by an Excel upload (they carry source = 'manual').
+app.post("/api/manual-invoice", auth.requireRole("admin"), wrap(async (req, res) => {
+  const { partner: slug, ...inv } = req.body || {};
+  const partner = await partners.getPartner(slug || "");
+  if (!partner) return res.status(400).json({ error: "unknown partner" });
+  try {
+    const out = await invoices.createInvoice(partner.slug, inv, req.user.email);
+    res.json({ ok: true, ...out });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+app.get("/api/manual-invoice", auth.requireRole("admin"), wrap(async (req, res) => {
+  const inv = await invoices.getManualInvoice(req.query.partner, req.query.invoice);
+  if (!inv) return res.status(404).json({ error: "manual invoice not found" });
+  res.json(inv);
+}));
+
+app.put("/api/manual-invoice", auth.requireRole("admin"), wrap(async (req, res) => {
+  const { partner: slug, originalInvoice, ...inv } = req.body || {};
+  const partner = await partners.getPartner(slug || "");
+  if (!partner) return res.status(400).json({ error: "unknown partner" });
+  try {
+    const out = await invoices.updateInvoice(partner.slug, originalInvoice, inv, req.user.email);
+    res.json({ ok: true, ...out });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+app.delete("/api/manual-invoice", auth.requireRole("admin"), wrap(async (req, res) => {
+  try {
+    const out = await invoices.deleteInvoice(req.query.partner, req.query.invoice, req.user.email);
+    res.json({ ok: true, ...out });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+// ── uploaded source files (admin + owner only) ───────────
+// Partners must NEVER get this: the raw sheet contains supplier and cost
+// columns that the whole scoping layer exists to hide.
+app.get("/api/dataset-file", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
+  const row = await db.one(
+    "SELECT file_name, file_mime, file_bytes FROM datasets WHERE id = $1", [req.query.id]);
+  if (!row || !row.file_bytes) return res.status(404).json({ error: "file not stored for this upload" });
+  res.setHeader("Content-Type", row.file_mime ||
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition",
+    `attachment; filename="${(row.file_name || "upload.xlsx").replace(/"/g, "")}"`);
+  res.end(row.file_bytes);
+}));
+
+// ── audit trail (admin + owner) ──────────────────────────
+app.get("/api/audit", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
+  res.json({ entries: await invoices.listAudit(req.query.partner || null, 200) });
 }));
 
 // ── user management (admin) ──────────────────────────────

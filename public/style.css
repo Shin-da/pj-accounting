@@ -3144,3 +3144,22 @@ tfoot td { position: sticky; bottom: 0; background: var(--surface2); border-top:
 .pr-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .pr-logo-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pr-logo-actions input[type=file] { font-size: 11.5px; max-width: 190px; color: var(--muted); }
+
+/* manual invoice editor */
+.inv-listcol { width: 300px; min-width: 300px; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+.inv-listcol .inv-list { width: 100%; min-width: 0; border-right: none; flex: 1; }
+.inv-toolbar { padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.modal-wide { width: min(880px, 96vw); max-height: 88vh; overflow-y: auto; }
+.inv-form-head { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+.inv-form-head .fld { display: block; }
+.inv-form-head .keyin { margin: 4px 0 0; width: 100%; }
+.inv-items-wrap { border: 1px solid var(--border); border-radius: var(--r-lg); max-height: 320px; }
+#fItems input, #fItems select { width: 100%; padding: 4px 6px; font-size: 12.5px; border: 1px solid var(--border2);
+  border-radius: var(--r); background: var(--surface); color: var(--text); font-family: var(--sans); }
+#fItems td { padding: 4px 6px; }
+#fItems th { font-size: 10px; }
+.inv-form-totals { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 12px; padding: 10px 14px;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: var(--r-lg); font-size: 13px; }
+.inv-form-totals b { font-family: var(--mono); }
+.pill-manual { font-size: 10px; padding: 1px 6px; border-radius: 20px; background: var(--accent-light); color: var(--accent); margin-left: 6px; }
+.lnk-del { color: var(--danger); cursor: pointer; font-size: 15px; }

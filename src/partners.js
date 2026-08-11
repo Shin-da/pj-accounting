@@ -95,6 +95,7 @@ function rowToRecord(row) {
     commissionType: row.commission_type || "",
     commissionValue: Number(row.commission_value) || 0,
     sheet: row.sheet || "",
+    source: row.source || "import",
   };
 }
 
@@ -106,11 +107,16 @@ async function saveDataset(slug, parsed, opts = {}) {
   return db.tx(async (client) => {
     await client.query("UPDATE datasets SET is_current = FALSE WHERE partner_slug = $1", [slug]);
 
+    // The original .xlsx is kept so any past upload can be downloaded or
+    // re-parsed later. Manual invoices are NOT touched here - they have
+    // source = 'manual' and belong to the partner, not to this upload.
     const ds = await client.query(
-      `INSERT INTO datasets (partner_slug, file_name, uploaded_by, meta, is_current)
-       VALUES ($1, $2, $3, $4, TRUE) RETURNING id`,
+      `INSERT INTO datasets (partner_slug, file_name, uploaded_by, meta, is_current,
+                             file_bytes, file_mime)
+       VALUES ($1, $2, $3, $4, TRUE, $5, $6) RETURNING id`,
       [slug, opts.fileName || (parsed.meta && parsed.meta.fileName) || null,
-       opts.uploadedBy || null, JSON.stringify(parsed.meta || {})]);
+       opts.uploadedBy || null, JSON.stringify(parsed.meta || {}),
+       opts.fileBytes || null, opts.fileMime || null]);
     const datasetId = ds.rows[0].id;
 
     // Bulk insert in chunks — one statement per ~500 rows keeps the query
@@ -140,10 +146,24 @@ async function loadDataset(slug) {
     `SELECT id, file_name, uploaded_at, meta FROM datasets
      WHERE partner_slug = $1 AND is_current = TRUE
      ORDER BY uploaded_at DESC LIMIT 1`, [slug]);
-  if (!ds) return { records: [], meta: null };
+  if (!ds) {
+    // No upload yet - but there may still be manual invoices to show.
+    const manual = await db.query(
+      "SELECT * FROM records WHERE partner_slug = $1 AND source = 'manual' ORDER BY txn_date NULLS LAST, invoice, row_no",
+      [slug]);
+    if (!manual.length) return { records: [], meta: null };
+    return {
+      records: manual.map(rowToRecord),
+      meta: { rows: manual.length, manualOnly: true, uploadedAt: new Date().toISOString() },
+    };
+  }
 
+  // Imported rows from the current dataset PLUS every manual invoice for this
+  // partner. Manual rows survive uploads by design.
   const rows = await db.query(
-    "SELECT * FROM records WHERE dataset_id = $1 ORDER BY row_no", [ds.id]);
+    `SELECT * FROM records
+     WHERE (dataset_id = $1 AND source = 'import') OR (partner_slug = $2 AND source = 'manual')
+     ORDER BY txn_date NULLS LAST, invoice, row_no`, [ds.id, slug]);
 
   const meta = { ...(ds.meta || {}) };
   meta.uploadedAt = ds.uploaded_at instanceof Date ? ds.uploaded_at.toISOString() : ds.uploaded_at;

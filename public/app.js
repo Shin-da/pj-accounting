@@ -67,6 +67,7 @@ async function boot() {
   const isAdmin = me.user.role === "admin";
   const isOwnerOrAdmin = isAdmin || me.user.role === "owner";
   $("#uploadBtn").hidden = !isAdmin;
+  $("#btnNewInvoice").hidden = !isAdmin;
   $("#adminNav").hidden = !isOwnerOrAdmin;
   $$("[data-admin]").forEach(el => el.hidden = !isAdmin);
 
@@ -328,7 +329,9 @@ async function loadInvoices() {
   if (!d.invoices || !d.invoices.length) { $("#invList").innerHTML = `<div class="page-sub" style="padding:16px;">No invoices for this partner.</div>`; return; }
   $("#invList").innerHTML = d.invoices.map(inv => `
     <div class="inv-row" data-reserve="${esc(inv.reserve)}" onclick="openInvoice('${inv.reserve.replace(/'/g,"\\'")}')">
-      <div class="inv-row-top"><span class="inv-res">${esc(inv.reserve)}</span>${inv.hasProof ? '<span class="inv-clip" title="has proof">📎</span>' : ''}</div>
+      <div class="inv-row-top"><span class="inv-res">${esc(inv.reserve)}</span>${
+        inv.source === "manual" ? '<span class="pill-manual" title="created in this system">manual</span>' : ''
+      }${inv.hasProof ? '<span class="inv-clip" title="has proof">📎</span>' : ''}</div>
       <div class="inv-row-sub">${esc(inv.clients.join(", ")) || "N/A"}</div>
       <div class="inv-row-meta"><span>${inv.date || "N/A"}</span><span>${inv.count} item${inv.count>1?"s":""}</span><span class="mono">${money(inv.amount)}</span></div>
     </div>`).join("");
@@ -370,7 +373,9 @@ async function openInvoice(reserve) {
 
   $("#invDetail").innerHTML = `
     <div class="inv-head">
-      <div class="inv-eyebrow">Invoice no.</div>
+      ${d.canEdit ? `<button class="btn btn-ghost btn-sm" style="float:right"
+           onclick="editInvoice('${d.reserve.replace(/'/g,"\\'")}')">Edit invoice</button>` : ""}
+      <div class="inv-eyebrow">Invoice no.${d.source === "manual" ? ' <span class="pill-manual">manual</span>' : ""}</div>
       <div class="inv-reserve">${esc(d.reserve)}</div>
       <div class="inv-headmeta">${d.date || "N/A"} · ${esc(d.clients.join(", ")) || "N/A"} · ${t.count} item${t.count>1?"s":""}</div>
     </div>
@@ -509,7 +514,7 @@ async function openUpload() {
   const d = await (await fetch("/api/partners")).json(); partnersCache = d.partners;
   updateUploadCurrent();
 }
-function closeModals() { $("#ovl").classList.remove("open"); $("#modal").classList.remove("open"); $("#pwModal").classList.remove("open"); }
+function closeModals() { $("#ovl").classList.remove("open"); $("#modal").classList.remove("open"); $("#pwModal").classList.remove("open"); $("#invModal").classList.remove("open"); }
 $("#uploadBtn").addEventListener("click", openUpload);
 $("#uploadPartner").addEventListener("change", updateUploadCurrent);
 $("#doUpload").addEventListener("click", async () => {
@@ -538,3 +543,164 @@ $("#doChangePw").addEventListener("click", async () => {
 });
 
 boot();
+
+// ── manual invoice editor (admin) ────────────────────────
+// Invoices created here carry source='manual': they show to the partner
+// alongside imported rows, and an Excel upload never overwrites them.
+let editingInvoiceNo = null;   // null = creating a new one
+let lineItems = [];
+
+const LINE_COLS = [
+  ["pjCode", "PJ code", "text"],
+  ["itemCode", "Item code", "text"],
+  ["itemType", "Type", "text"],
+  ["supplier", "Supplier", "text"],
+  ["weight", "Weight (g)", "num"],
+  ["supplierPrice", "Capital", "num"],
+  ["amount", "Item amount", "num"],
+  ["commissionType", "Comm. type", "select"],
+  ["commissionRate", "Rate", "num"],
+];
+
+function blankLine() {
+  return { pjCode:"", itemCode:"", itemType:"", supplier:"", weight:"",
+           supplierPrice:"", amount:"", commissionType:"JEWELRY",
+           commissionRate:"0.05", commissionValue:"" };
+}
+
+// Same rules as the sheet: gold = rate x weight, jewelry = rate x selling price.
+function calcCommission(it) {
+  const rate = Number(it.commissionRate);
+  if (!isFinite(rate) || rate === 0) return 0;
+  const t = String(it.commissionType || "").toUpperCase();
+  if (t === "GOLD") return Math.round(rate * (Number(it.weight) || 0) * 100) / 100;
+  if (t === "JEWELRY") return Math.round(rate * (Number(it.amount) || 0) * 100) / 100;
+  return 0;
+}
+const lineCommission = (it) =>
+  it.commissionValue !== "" && it.commissionValue != null
+    ? Number(it.commissionValue) : calcCommission(it);
+
+function renderLines() {
+  const head = `<thead><tr><th style="width:26px"></th>${
+    LINE_COLS.map(c => `<th class="${c[2]==="num"?"num":""}">${c[1]}</th>`).join("")
+  }<th class="num">Commission</th><th style="width:26px"></th></tr></thead>`;
+
+  const body = lineItems.map((it, i) => `<tr>
+    <td class="rownum">${i + 1}</td>
+    ${LINE_COLS.map(([k, , kind]) => {
+      if (kind === "select") {
+        return `<td><select data-i="${i}" data-k="${k}">
+          <option value="JEWELRY" ${it[k]==="JEWELRY"?"selected":""}>Jewelry</option>
+          <option value="GOLD" ${it[k]==="GOLD"?"selected":""}>Gold</option>
+        </select></td>`;
+      }
+      return `<td class="${kind==="num"?"num":""}"><input data-i="${i}" data-k="${k}"
+        type="${kind==="num"?"number":"text"}" step="any" value="${esc(it[k])}"></td>`;
+    }).join("")}
+    <td class="num"><input data-i="${i}" data-k="commissionValue" type="number" step="any"
+        placeholder="${lineCommission(it).toFixed(2)}" value="${esc(it.commissionValue)}"></td>
+    <td><span class="lnk-del" onclick="removeLine(${i})" title="Remove line">×</span></td>
+  </tr>`).join("");
+
+  $("#fItems").innerHTML = head + `<tbody>${body}</tbody>`;
+  $("#fItems").querySelectorAll("input,select").forEach(el =>
+    el.addEventListener("input", () => {
+      lineItems[+el.dataset.i][el.dataset.k] = el.value;
+      renderTotals();
+      // Re-render only when the commission basis changed, so typing isn't interrupted.
+      if (["commissionType","commissionRate","weight","amount"].includes(el.dataset.k)) {
+        const active = document.activeElement;
+        const i = active && active.dataset ? active.dataset.i : null;
+        const k = active && active.dataset ? active.dataset.k : null;
+        renderLines();
+        if (i != null) {
+          const back = $(`#fItems [data-i="${i}"][data-k="${k}"]`);
+          if (back) { back.focus(); if (back.setSelectionRange && back.type==="text") back.setSelectionRange(9999,9999); }
+        }
+      }
+    }));
+  renderTotals();
+}
+
+function renderTotals() {
+  const amount = lineItems.reduce((s, it) => s + (Number(it.amount) || 0), 0);
+  const comm   = lineItems.reduce((s, it) => s + lineCommission(it), 0);
+  const weight = lineItems.reduce((s, it) => s + (Number(it.weight) || 0), 0);
+  $("#fTotals").innerHTML =
+    `<span>${lineItems.length} line${lineItems.length===1?"":"s"}</span>` +
+    `<span>Weight <b>${grams(weight)}</b></span>` +
+    `<span>Item amount <b>${money(amount)}</b></span>` +
+    `<span>Commission <b>${money(comm)}</b></span>`;
+}
+
+function removeLine(i) { lineItems.splice(i, 1); if (!lineItems.length) lineItems.push(blankLine()); renderLines(); }
+
+function openInvoiceEditor(existing) {
+  editingInvoiceNo = existing ? existing.invoice : null;
+  $("#invModalTitle").textContent = existing ? "Edit invoice " + existing.invoice : "New invoice";
+  $("#btnDeleteInvoice").hidden = !existing;
+  $("#invMsg").textContent = "";
+  $("#fInvoice").value = existing ? existing.invoice : "";
+  $("#fClient").value  = existing ? existing.client : "";
+  $("#fDate").value    = existing ? existing.date : new Date().toISOString().slice(0, 10);
+  lineItems = existing && existing.items.length
+    ? existing.items.map(it => ({ ...it,
+        commissionValue: "",                      // blank = use the calculated value
+        commissionRate: it.commissionRate ?? "" }))
+    : [blankLine()];
+  renderLines();
+  $("#ovl").classList.add("open"); $("#invModal").classList.add("open");
+}
+
+$("#btnAddLine").addEventListener("click", () => { lineItems.push(blankLine()); renderLines(); });
+$("#btnNewInvoice").addEventListener("click", () => openInvoiceEditor(null));
+
+$("#btnSaveInvoice").addEventListener("click", async () => {
+  const payload = {
+    partner: partnerSlug,
+    invoice: $("#fInvoice").value.trim(),
+    client: $("#fClient").value.trim(),
+    date: $("#fDate").value,
+    items: lineItems,
+  };
+  if (editingInvoiceNo) payload.originalInvoice = editingInvoiceNo;
+
+  $("#invMsg").style.color = "var(--muted)";
+  $("#invMsg").textContent = "Saving…";
+  const r = await (await fetch("/api/manual-invoice", {
+    method: editingInvoiceNo ? "PUT" : "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })).json();
+
+  if (r.ok) {
+    closeModals();
+    await loadInvoices();
+    await load();                       // refresh KPIs/report too
+    openInvoice(r.invoice);
+  } else {
+    $("#invMsg").style.color = "var(--danger)";
+    $("#invMsg").textContent = r.error || "Could not save.";
+  }
+});
+
+$("#btnDeleteInvoice").addEventListener("click", async () => {
+  if (!editingInvoiceNo) return;
+  if (!confirm(`Delete invoice ${editingInvoiceNo}? This cannot be undone.`)) return;
+  const qs = new URLSearchParams({ partner: partnerSlug, invoice: editingInvoiceNo });
+  const r = await (await fetch("/api/manual-invoice?" + qs, { method: "DELETE" })).json();
+  if (r.ok) {
+    closeModals();
+    $("#invDetail").innerHTML = `<div class="empty-state"><div class="empty-text">Invoice deleted.</div></div>`;
+    await loadInvoices(); await load();
+  } else alert("Could not delete: " + (r.error || "unknown"));
+});
+
+/** Load a manual invoice into the editor (called from the detail view). */
+async function editInvoice(no) {
+  const qs = new URLSearchParams({ partner: partnerSlug, invoice: no });
+  const d = await (await fetch("/api/manual-invoice?" + qs)).json();
+  if (d.error) { alert(d.error); return; }
+  openInvoiceEditor(d);
+}

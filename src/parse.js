@@ -216,7 +216,8 @@ function groupInvoices(records, { from, to } = {}) {
   for (const r of rows) {
     const k = r.invoice || "(no reserve)";
     let inv = map.get(k);
-    if (!inv) { inv = { reserve: k, date: r.date, clients: new Set(), items: [], amount: 0, commissionValue: 0, cost: 0, weight: 0 }; map.set(k, inv); }
+    if (!inv) { inv = { reserve: k, date: r.date, clients: new Set(), items: [], amount: 0, commissionValue: 0, cost: 0, weight: 0, source: r.source || "import" }; map.set(k, inv); }
+    if (r.source === "manual") inv.source = "manual";
     inv.items.push(r);
     if (r.client) inv.clients.add(r.client);
     if (r.date && (!inv.date || r.date < inv.date)) inv.date = r.date;

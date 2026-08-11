@@ -42,8 +42,14 @@ CREATE TABLE IF NOT EXISTS datasets (
     uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     uploaded_by  TEXT,
     is_current   BOOLEAN NOT NULL DEFAULT TRUE,
-    meta         JSONB NOT NULL DEFAULT '{}'::jsonb
+    meta         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- The original .xlsx, kept so any past upload can be downloaded or
+    -- re-parsed later. ~75 KB each; move to object storage if this grows.
+    file_bytes   BYTEA,
+    file_mime    TEXT
 );
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS file_bytes BYTEA;
+ALTER TABLE datasets ADD COLUMN IF NOT EXISTS file_mime  TEXT;
 CREATE INDEX IF NOT EXISTS idx_datasets_partner ON datasets(partner_slug, is_current);
 
 -- ── the actual line items ────────────────────────────────────────────
@@ -51,8 +57,13 @@ CREATE INDEX IF NOT EXISTS idx_datasets_partner ON datasets(partner_slug, is_cur
 -- into SQL as the data grows.
 CREATE TABLE IF NOT EXISTS records (
     id                BIGSERIAL PRIMARY KEY,
-    dataset_id        BIGINT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+    -- NULL for manually-created rows: they belong to the partner, not to an
+    -- upload, so a new Excel upload can never delete them.
+    dataset_id        BIGINT REFERENCES datasets(id) ON DELETE CASCADE,
     partner_slug      TEXT   NOT NULL,
+    -- 'import' = came from an Excel upload (replaced on re-upload)
+    -- 'manual' = created in the app  (never touched by uploads)
+    source            TEXT   NOT NULL DEFAULT 'import',
     row_no            INTEGER,
     txn_date          DATE,
     invoice           TEXT,
@@ -76,6 +87,30 @@ CREATE INDEX IF NOT EXISTS idx_records_partner  ON records(partner_slug);
 CREATE INDEX IF NOT EXISTS idx_records_date     ON records(txn_date);
 CREATE INDEX IF NOT EXISTS idx_records_invoice  ON records(invoice);
 CREATE INDEX IF NOT EXISTS idx_records_client   ON records(client);
+CREATE INDEX IF NOT EXISTS idx_records_source   ON records(partner_slug, source);
+
+-- Columns added after the first release: applied here so an existing database
+-- is upgraded in place when the app starts.
+ALTER TABLE records ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'import';
+ALTER TABLE records ALTER COLUMN dataset_id DROP NOT NULL;
+ALTER TABLE records ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE records ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+
+-- ── audit trail ──────────────────────────────────────────────────────
+-- Every write that a person makes, so "who changed this and when" always
+-- has an answer. Cheap to write, invaluable the first time it's disputed.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id           BIGSERIAL PRIMARY KEY,
+    at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actor        TEXT,                -- email of the signed-in user
+    action       TEXT NOT NULL,       -- invoice.create | invoice.update | invoice.delete | upload | ...
+    partner_slug TEXT,
+    entity       TEXT,                -- e.g. the invoice number
+    details      JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_audit_partner ON audit_log(partner_slug, at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_entity  ON audit_log(entity);
 
 -- ── images ───────────────────────────────────────────────────────────
 -- Stored in the database so there is ONE thing to back up and nothing to

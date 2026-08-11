@@ -113,7 +113,12 @@
 
       <section class="page" id="page-invoices">
         <div class="inv-layout">
-          <div class="inv-list" id="invList"></div>
+          <div class="inv-listcol">
+            <div class="inv-toolbar">
+              <button class="btn btn-primary btn-sm" id="btnNewInvoice" hidden>+ New invoice</button>
+            </div>
+            <div class="inv-list" id="invList"></div>
+          </div>
           <div class="inv-detail" id="invDetail">
             <div class="empty-state"><div class="empty-icon">▧</div><div class="empty-text">Select an invoice on the left to see its breakdown.</div></div>
           </div>
@@ -175,6 +180,39 @@
     <div class="modal-foot">
       <button class="btn btn-ghost btn-sm" onclick="closeModals()">Cancel</button>
       <button class="btn btn-primary btn-sm" id="doUpload">Upload</button>
+    </div>
+  </div>
+
+  <!-- Manual invoice editor -->
+  <div id="invModal" class="modal modal-wide">
+    <h3 id="invModalTitle">New invoice</h3>
+    <p class="page-sub" id="invModalSub">Created here, shown to the partner, and never overwritten by an Excel upload.</p>
+
+    <div class="inv-form-head">
+      <label class="fld">Invoice no.
+        <input type="text" id="fInvoice" class="keyin" placeholder="e.g. RDR0055">
+      </label>
+      <label class="fld">Date
+        <input type="date" id="fDate" class="keyin">
+      </label>
+      <label class="fld">Client
+        <input type="text" id="fClient" class="keyin" placeholder="Client name">
+      </label>
+    </div>
+
+    <div class="section-heading" style="margin-top:12px;">Line items</div>
+    <div class="table-wrap inv-items-wrap">
+      <table class="grid" id="fItems"></table>
+    </div>
+    <button class="btn btn-ghost btn-sm" id="btnAddLine" style="margin-top:8px;">+ Add line</button>
+
+    <div class="inv-form-totals" id="fTotals"></div>
+    <div id="invMsg" class="page-sub"></div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost btn-sm" id="btnDeleteInvoice" hidden>Delete</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost btn-sm" onclick="closeModals()">Cancel</button>
+      <button class="btn btn-primary btn-sm" id="btnSaveInvoice">Save invoice</button>
     </div>
   </div>
 
