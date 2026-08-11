@@ -35,6 +35,7 @@ function refreshAll() {
   $("#fClear").hidden = !(filters.q || filters.commType || filters.client);
   load();
   if (document.querySelector("#page-invoices.active")) loadInvoices();
+  if (document.querySelector("#page-payments.active")) loadPayments();
 }
 
 const esc = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -126,6 +127,7 @@ $$(".nav-item").forEach(b => b.addEventListener("click", () => {
   if (b.dataset.page === "partners") loadPartners();
   if (b.dataset.page === "users") loadUsers();
   if (b.dataset.page === "invoices") loadInvoices();
+  if (b.dataset.page === "payments") loadPayments();
 }));
 
 // ── period + filters ─────────────────────────────────────
@@ -198,6 +200,14 @@ function renderKPIs() {
   if (k.margin !== undefined) cards.push({ label: "Est. gross margin", value: money(k.margin), cls: "teal", sub: `${(k.margin/k.amount*100).toFixed(1)}% of sales` });
   if (k.onelive !== undefined) cards.push({ label: "ONELIVE profit", value: money(k.onelive), cls: "", sub: "Perfect Jewel share" });
   cards.push({ label: "Total weight", value: grams(k.weight), cls: "", sub: "gold items" });
+  // Balance payable is all-time (not affected by the date filter) — it's what
+  // we still owe this partner overall.
+  if (CURRENT.payout) {
+    const owing = CURRENT.payout.balance > 0.005;
+    cards.push({ label: "Balance payable", value: money(CURRENT.payout.balance),
+      cls: owing ? "balance-due" : "balance-clear",
+      sub: `${money(CURRENT.payout.paid)} paid of ${money(CURRENT.payout.earned)}` });
+  }
   $("#kpis").innerHTML = cards.map(c => `<div class="kpi-card"><div class="kpi-label">${c.label}</div><div class="kpi-value ${c.cls}">${c.value}</div><div class="kpi-sub">${c.sub}</div></div>`).join("");
 }
 
@@ -703,4 +713,86 @@ async function editInvoice(no) {
   const d = await (await fetch("/api/manual-invoice?" + qs)).json();
   if (d.error) { alert(d.error); return; }
   openInvoiceEditor(d);
+}
+
+// ── commission payouts (statement of account) ────────────
+// A running account, not per-invoice: earned − paid = balance payable.
+// Owner + admin record payments; the partner sees it read-only.
+async function loadPayments() {
+  const qs = new URLSearchParams(); if (partnerSlug) qs.set("partner", partnerSlug);
+  const r = await fetch("/api/payments?" + qs);
+  if (r.status === 403) {
+    $("#payKpis").innerHTML = "";
+    $("#tblPayments").innerHTML = "";
+    $("#payFormCard").hidden = true;
+    return;
+  }
+  const d = await r.json();
+  if (!d.summary) { $("#payKpis").innerHTML = `<div class="page-sub">No partner selected.</div>`; return; }
+
+  const s = d.summary;
+  const owing = s.balance > 0.005;
+  $("#payKpis").innerHTML = `
+    <div class="kpi-card"><div class="kpi-label">Commission earned</div>
+      <div class="kpi-value">${money(s.earned)}</div>
+      <div class="kpi-sub">total, all time</div></div>
+    <div class="kpi-card"><div class="kpi-label">Total paid</div>
+      <div class="kpi-value teal">${money(s.paid)}</div>
+      <div class="kpi-sub">${d.payments.length} payment${d.payments.length===1?"":"s"}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Balance payable</div>
+      <div class="kpi-value ${owing ? "balance-due" : "balance-clear"}">${money(s.balance)}</div>
+      <div class="kpi-sub">${esc(s.status)}</div></div>`;
+
+  $("#ncPayments").textContent = d.payments.length || "";
+  $("#payFormCard").hidden = !d.canRecord;
+  if (d.canRecord && !$("#payDate").value) $("#payDate").value = new Date().toISOString().slice(0,10);
+
+  const cols = [["paid_on","Date"],["amount","Amount","num"],["method","Method"],
+                ["reference","Reference"],["note","Note"],["created_by","Recorded by"],
+                ["proof","Proof"],["act","",""]];
+  const head = `<thead><tr>${cols.map(c=>`<th class="${c[2]==='num'?'num':''}">${c[1]}</th>`).join("")}</tr></thead>`;
+  const body = d.payments.map(p => `<tr>
+      <td>${String(p.paid_on).slice(0,10)}</td>
+      <td class="num">${money(p.amount)}</td>
+      <td>${disp(p.method)}</td>
+      <td>${disp(p.reference)}</td>
+      <td>${disp(p.note)}</td>
+      <td class="page-sub">${disp(p.created_by)}</td>
+      <td>${p.has_proof ? `<a href="/api/payment-proof?id=${p.id}" target="_blank">view</a>` : "N/A"}</td>
+      <td>${d.canRecord ? `<span class="lnk-del" title="Delete payment" onclick="deletePayment(${p.id})">×</span>` : ""}</td>
+    </tr>`).join("");
+  $("#tblPayments").innerHTML = head + `<tbody>${body}</tbody>` +
+    (d.payments.length ? "" : `<tbody><tr><td colspan="8" class="page-sub" style="padding:14px;">No payments recorded yet.</td></tr></tbody>`);
+}
+
+$("#btnAddPayment")?.addEventListener("click", async () => {
+  const fd = new FormData();
+  fd.append("partner", partnerSlug);
+  fd.append("amount", $("#payAmount").value);
+  fd.append("paidOn", $("#payDate").value);
+  fd.append("method", $("#payMethod").value);
+  fd.append("reference", $("#payRef").value);
+  fd.append("note", $("#payNote").value);
+  const f = $("#payProof").files[0]; if (f) fd.append("file", f);
+
+  $("#payMsg").style.color = "var(--muted)";
+  $("#payMsg").textContent = "Saving…";
+  const r = await (await fetch("/api/payments", { method: "POST", body: fd })).json();
+  if (r.ok) {
+    $("#payAmount").value = ""; $("#payRef").value = ""; $("#payNote").value = "";
+    $("#payProof").value = "";
+    $("#payMsg").style.color = "var(--success)";
+    $("#payMsg").textContent = `Recorded. Balance now ${money(r.summary.balance)}.`;
+    loadPayments(); load();
+  } else {
+    $("#payMsg").style.color = "var(--danger)";
+    $("#payMsg").textContent = r.error || "Could not save.";
+  }
+});
+
+async function deletePayment(id) {
+  if (!confirm("Delete this payment? The balance will go back up.")) return;
+  const r = await (await fetch("/api/payments/" + id, { method: "DELETE" })).json();
+  if (r.ok) { loadPayments(); load(); }
+  else alert("Could not delete: " + (r.error || "unknown"));
 }

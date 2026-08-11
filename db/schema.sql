@@ -137,6 +137,31 @@ CREATE TABLE IF NOT EXISTS logos (
     uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ── commission payouts ───────────────────────────────────────────────
+-- Money flowing FROM Perfect Jewel TO the partner.
+--
+-- A payment belongs to the PARTNER, not to an invoice: in practice a single
+-- transfer settles many invoices at once. So this is a running account —
+--
+--     balance payable  =  total commission earned  −  total paid
+--
+-- `reference` is free text (an OR number, a transfer ref, or "covers RDR0031-35")
+-- so a payment CAN be described against invoices without being bound to one.
+CREATE TABLE IF NOT EXISTS payments (
+    id           BIGSERIAL PRIMARY KEY,
+    partner_slug TEXT NOT NULL REFERENCES partners(slug) ON DELETE CASCADE,
+    amount       NUMERIC(16,2) NOT NULL,
+    paid_on      DATE NOT NULL,
+    method       TEXT,                       -- bank transfer / cash / cheque / ...
+    reference    TEXT,                       -- OR no., transfer ref, invoices covered
+    note         TEXT,
+    proof_mime   TEXT,                       -- optional proof of payment image
+    proof_bytes  BYTEA,
+    created_by   TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_payments_partner ON payments(partner_slug, paid_on DESC);
+
 -- ── app settings (session secret, etc.) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,

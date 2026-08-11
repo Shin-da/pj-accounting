@@ -48,6 +48,7 @@
         <button class="nav-item" data-page="clients"><span class="ni">◔</span> By client <span class="n-count" id="ncClients"></span></button>
         <button class="nav-item" data-page="types"><span class="ni">◇</span> By commission type <span class="n-count" id="ncTypes"></span></button>
         <button class="nav-item" data-page="invoices"><span class="ni">▧</span> Invoices <span class="n-count" id="ncInvoices"></span></button>
+        <button class="nav-item" data-page="payments"><span class="ni">₱</span> Payouts <span class="n-count" id="ncPayments"></span></button>
       </div>
       <div class="sidebar-section" id="adminNav" hidden>
         <div class="sidebar-label">Management</div>
@@ -121,6 +122,43 @@
           </div>
           <div class="inv-detail" id="invDetail">
             <div class="empty-state"><div class="empty-icon">▧</div><div class="empty-text">Select an invoice on the left to see its breakdown.</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="page-payments">
+        <div class="overview-body">
+          <div class="section-heading">Commission payouts — statement of account</div>
+          <div class="kpi-grid" id="payKpis"></div>
+
+          <div class="card" id="payFormCard" hidden style="max-width:640px;margin-bottom:18px;">
+            <div class="kpi-label">Record a payment</div>
+            <div class="pay-form">
+              <label class="fld">Amount<input type="number" step="0.01" id="payAmount" class="keyin" placeholder="0.00"></label>
+              <label class="fld">Date paid<input type="date" id="payDate" class="keyin"></label>
+              <label class="fld">Method
+                <select id="payMethod" class="filter-select">
+                  <option value="Bank transfer">Bank transfer</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="GCash">GCash</option>
+                  <option value="Other">Other</option>
+                </select>
+              </label>
+              <label class="fld">Reference<input type="text" id="payRef" class="keyin" placeholder="OR no. / transfer ref / invoices covered"></label>
+              <label class="fld" style="grid-column:1/-1;">Note<input type="text" id="payNote" class="keyin" placeholder="optional"></label>
+              <label class="fld" style="grid-column:1/-1;">Proof of payment (image or PDF, optional)
+                <input type="file" id="payProof" accept="image/*,application/pdf"></label>
+            </div>
+            <div style="margin-top:12px;">
+              <button class="btn btn-primary btn-sm" id="btnAddPayment">Record payment</button>
+              <span id="payMsg" class="page-sub" style="margin-left:10px;"></span>
+            </div>
+          </div>
+
+          <div class="section-heading">Payment history</div>
+          <div class="table-wrap" style="border:1px solid var(--border); border-radius:var(--r-lg);">
+            <table id="tblPayments"></table>
           </div>
         </div>
       </section>

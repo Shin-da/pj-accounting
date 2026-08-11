@@ -22,6 +22,7 @@ const partners = require("./partners");
 const proofs = require("./proofs");
 const logos = require("./logos");
 const invoices = require("./invoices");
+const payments = require("./payments");
 
 /** Wrap an async handler so a thrown error becomes a 500 instead of a hang. */
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -192,10 +193,14 @@ app.get("/api/report", auth.requireAuth, wrap(async (req, res) => {
   // doesn't empty the others' choices.
   const clientSet = new Set(ds.records.map((r) => r.client).filter(Boolean));
 
+  // Balance payable is an ALL-TIME figure (not filtered by the date window):
+  // what we still owe this partner overall.
+  const payout = flags.commission ? await payments.summary(partner.slug) : null;
+
   res.json({
     currency: CURRENCY, partner: { slug: partner.slug, name: partner.name },
     meta: ds.meta, flags, typeDimension: dimension,
-    totals,
+    totals, payout,
     filterOptions: { clients: [...clientSet].sort(), commTypes: ["Gold", "Jewelry"] },
     ...scope(agg, flags, dimension),
   });
@@ -437,6 +442,58 @@ app.get("/api/dataset-file", auth.requireRole("admin", "owner"), wrap(async (req
 // ── audit trail (admin + owner) ──────────────────────────
 app.get("/api/audit", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
   res.json({ entries: await invoices.listAudit(req.query.partner || null, 200) });
+}));
+
+// ── commission payouts ───────────────────────────────────────────────
+// A running account per partner: earned − paid = balance payable.
+// Owner and admin record payments; the partner sees the statement read-only.
+
+app.get("/api/payments", auth.requireAuth, wrap(async (req, res) => {
+  const partner = await resolvePartner(req);
+  if (!partner) return res.json({ payments: [], summary: null });
+  const flags = effectiveFlags(req.user, partner);
+  // If a partner isn't allowed to see commission at all, they can't see the
+  // payout statement either — it's the same number.
+  if (!flags.commission) return res.status(403).json({ error: "not available" });
+
+  res.json({
+    partner: { slug: partner.slug, name: partner.name },
+    currency: CURRENCY,
+    summary: await payments.summary(partner.slug),
+    payments: await payments.listPayments(partner.slug),
+    canRecord: req.user.role === "admin" || req.user.role === "owner",
+  });
+}));
+
+app.post("/api/payments", auth.requireRole("admin", "owner"),
+  imageUpload.single("file"), wrap(async (req, res) => {
+    const partner = await partners.getPartner((req.body && req.body.partner) || "");
+    if (!partner) return res.status(400).json({ error: "unknown partner" });
+    try {
+      const proof = req.file ? { mime: req.file.mimetype, bytes: req.file.buffer } : null;
+      const out = await payments.addPayment(partner.slug, {
+        amount: req.body.amount, paidOn: req.body.paidOn, method: req.body.method,
+        reference: req.body.reference, note: req.body.note,
+      }, req.user.email, proof);
+      res.json({ ok: true, ...out });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  }));
+
+app.delete("/api/payments/:id", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
+  try { res.json({ ok: true, ...(await payments.deletePayment(req.params.id, req.user.email)) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+// Proof of payment. Partners may only fetch their own.
+app.get("/api/payment-proof", auth.requireAuth, wrap(async (req, res) => {
+  const proof = await payments.getProof(req.query.id);
+  if (!proof) return res.status(404).end();
+  if (req.user.role === "partner" && proof.partnerSlug !== req.user.partner) {
+    return res.status(403).end();
+  }
+  res.setHeader("Content-Type", proof.mime || "application/octet-stream");
+  res.setHeader("Cache-Control", "private, max-age=60");
+  res.end(proof.bytes);
 }));
 
 // ── user management (admin) ──────────────────────────────
