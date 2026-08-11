@@ -190,23 +190,23 @@
 
     <div class="inv-form-head">
       <label class="fld">Invoice no.
-        <input type="text" id="fInvoice" class="keyin" placeholder="e.g. RDR0055">
+        <input type="text" id="invNo" class="keyin" placeholder="e.g. RDR0055">
       </label>
       <label class="fld">Date
-        <input type="date" id="fDate" class="keyin">
+        <input type="date" id="invDate" class="keyin">
       </label>
       <label class="fld">Client
-        <input type="text" id="fClient" class="keyin" placeholder="Client name">
+        <input type="text" id="invClient" class="keyin" placeholder="Client name">
       </label>
     </div>
 
     <div class="section-heading" style="margin-top:12px;">Line items</div>
     <div class="table-wrap inv-items-wrap">
-      <table class="grid" id="fItems"></table>
+      <table class="grid" id="invItems"></table>
     </div>
     <button class="btn btn-ghost btn-sm" id="btnAddLine" style="margin-top:8px;">+ Add line</button>
 
-    <div class="inv-form-totals" id="fTotals"></div>
+    <div class="inv-form-totals" id="invTotals"></div>
     <div id="invMsg" class="page-sub"></div>
     <div class="modal-foot">
       <button class="btn btn-ghost btn-sm" id="btnDeleteInvoice" hidden>Delete</button>

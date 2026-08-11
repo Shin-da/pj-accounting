@@ -603,8 +603,8 @@ function renderLines() {
     <td><span class="lnk-del" onclick="removeLine(${i})" title="Remove line">×</span></td>
   </tr>`).join("");
 
-  $("#fItems").innerHTML = head + `<tbody>${body}</tbody>`;
-  $("#fItems").querySelectorAll("input,select").forEach(el =>
+  $("#invItems").innerHTML = head + `<tbody>${body}</tbody>`;
+  $("#invItems").querySelectorAll("input,select").forEach(el =>
     el.addEventListener("input", () => {
       lineItems[+el.dataset.i][el.dataset.k] = el.value;
       renderTotals();
@@ -627,7 +627,7 @@ function renderTotals() {
   const amount = lineItems.reduce((s, it) => s + (Number(it.amount) || 0), 0);
   const comm   = lineItems.reduce((s, it) => s + lineCommission(it), 0);
   const weight = lineItems.reduce((s, it) => s + (Number(it.weight) || 0), 0);
-  $("#fTotals").innerHTML =
+  $("#invTotals").innerHTML =
     `<span>${lineItems.length} line${lineItems.length===1?"":"s"}</span>` +
     `<span>Weight <b>${grams(weight)}</b></span>` +
     `<span>Item amount <b>${money(amount)}</b></span>` +
@@ -641,9 +641,9 @@ function openInvoiceEditor(existing) {
   $("#invModalTitle").textContent = existing ? "Edit invoice " + existing.invoice : "New invoice";
   $("#btnDeleteInvoice").hidden = !existing;
   $("#invMsg").textContent = "";
-  $("#fInvoice").value = existing ? existing.invoice : "";
-  $("#fClient").value  = existing ? existing.client : "";
-  $("#fDate").value    = existing ? existing.date : new Date().toISOString().slice(0, 10);
+  $("#invNo").value = existing ? existing.invoice : "";
+  $("#invClient").value = existing ? existing.client : "";
+  $("#invDate").value    = existing ? existing.date : new Date().toISOString().slice(0, 10);
   lineItems = existing && existing.items.length
     ? existing.items.map(it => ({ ...it,
         commissionValue: "",                      // blank = use the calculated value
@@ -659,9 +659,9 @@ $("#btnNewInvoice")?.addEventListener("click", () => openInvoiceEditor(null));
 $("#btnSaveInvoice")?.addEventListener("click", async () => {
   const payload = {
     partner: partnerSlug,
-    invoice: $("#fInvoice").value.trim(),
-    client: $("#fClient").value.trim(),
-    date: $("#fDate").value,
+    invoice: $("#invNo").value.trim(),
+    client: $("#invClient").value.trim(),
+    date: $("#invDate").value,
     items: lineItems,
   };
   if (editingInvoiceNo) payload.originalInvoice = editingInvoiceNo;
