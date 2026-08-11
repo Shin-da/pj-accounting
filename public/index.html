@@ -74,6 +74,7 @@
         <select id="fCommType" class="filter-select"><option value="">All comm. types</option><option value="Gold">Gold</option><option value="Jewelry">Jewelry</option></select>
         <select id="fClient" class="filter-select"><option value="">All clients</option></select>
         <button class="btn btn-ghost btn-sm" id="fClear" hidden>Clear filters</button>
+        <div id="fChips" class="fchips"></div>
         <div class="filter-spacer" style="flex:1"></div>
         <button class="btn btn-ghost btn-sm" onclick="window.print()">Print / PDF</button>
         <button class="btn btn-ghost btn-sm" onclick="downloadCSV()">Download CSV</button>
@@ -223,31 +224,44 @@
 
   <!-- Manual invoice editor -->
   <div id="invModal" class="modal modal-wide">
-    <h3 id="invModalTitle">New invoice</h3>
-    <p class="page-sub" id="invModalSub">Created here, shown to the partner, and never overwritten by an Excel upload.</p>
-
-    <div class="inv-form-head">
-      <label class="fld">Invoice no.
-        <input type="text" id="invNo" class="keyin" placeholder="e.g. RDR0055">
-      </label>
-      <label class="fld">Date
-        <input type="date" id="invDate" class="keyin">
-      </label>
-      <label class="fld">Client
-        <input type="text" id="invClient" class="keyin" placeholder="Client name">
-      </label>
+    <div class="modal-head">
+      <h3 id="invModalTitle">New invoice</h3>
+      <p class="page-sub" id="invModalSub">Created here, shown to the partner, and never overwritten by an Excel upload.</p>
     </div>
 
-    <div class="section-heading" style="margin-top:12px;">Line items</div>
-    <div class="table-wrap inv-items-wrap">
-      <table class="grid" id="invItems"></table>
-    </div>
-    <button class="btn btn-ghost btn-sm" id="btnAddLine" style="margin-top:8px;">+ Add line</button>
+    <div class="modal-body">
+      <div class="inv-form-head">
+        <label class="fld">Invoice no.
+          <input type="text" id="invNo" class="keyin" placeholder="e.g. RDR0055">
+        </label>
+        <label class="fld">Date
+          <input type="date" id="invDate" class="keyin">
+        </label>
+        <label class="fld">Client
+          <input type="text" id="invClient" class="keyin" placeholder="Client name" list="clientList" autocomplete="off">
+          <datalist id="clientList"></datalist>
+        </label>
+      </div>
 
-    <div class="inv-form-totals" id="invTotals"></div>
-    <div id="invMsg" class="page-sub"></div>
+      <div class="lines-head">
+        <div class="section-heading">Line items</div>
+        <div class="lines-hint">Commission fills itself in — gold bills per gram, jewelry per item amount. Type a figure only to override it.</div>
+      </div>
+      <div class="table-wrap inv-items-wrap">
+        <table class="grid lines-table" id="invItems"></table>
+      </div>
+      <div class="lines-actions">
+        <button class="btn btn-ghost btn-sm" id="btnAddLine">+ Add line</button>
+        <button class="btn btn-ghost btn-sm" id="btnDupLine" title="Copy the last line">Duplicate last</button>
+        <span class="lines-kbd">Ctrl + Enter saves · Esc closes</span>
+      </div>
+
+      <div class="inv-form-totals" id="invTotals"></div>
+      <div id="invMsg" class="page-sub"></div>
+    </div>
+
     <div class="modal-foot">
-      <button class="btn btn-ghost btn-sm" id="btnDeleteInvoice" hidden>Delete</button>
+      <button class="btn btn-ghost btn-sm btn-danger-ghost" id="btnDeleteInvoice" hidden>Delete invoice</button>
       <span style="flex:1"></span>
       <button class="btn btn-ghost btn-sm" onclick="closeModals()">Cancel</button>
       <button class="btn btn-primary btn-sm" id="btnSaveInvoice">Save invoice</button>

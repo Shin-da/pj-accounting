@@ -33,12 +33,84 @@ function filterQS() {
 function refreshAll() {
   saveFilters();
   $("#fClear").hidden = !(filters.q || filters.commType || filters.client);
+  renderChips();
   load();
   if (document.querySelector("#page-invoices.active")) loadInvoices();
   if (document.querySelector("#page-payments.active")) loadPayments();
 }
 
+/* Active filters, shown as removable chips.
+   Drilling in from a table changes global state silently; without this the
+   next screen looks like it's missing data rather than being filtered. */
+function renderChips() {
+  const box = $("#fChips"); if (!box) return;
+  const chips = [];
+  if (filters.client)   chips.push(["client", "Client", filters.client]);
+  if (filters.commType) chips.push(["commType", "Type", filters.commType]);
+  if (filters.q)        chips.push(["q", "Search", filters.q]);
+  box.innerHTML = chips.map(([k, label, v]) =>
+    `<span class="fchip">${label} <b>${esc(v)}</b><button data-chip="${k}" title="Remove">×</button></span>`).join("");
+  box.querySelectorAll("[data-chip]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.chip;
+    filters[k] = "";
+    if (k === "client") $("#fClient").value = "";
+    if (k === "commType") $("#fCommType").value = "";
+    if (k === "q") $("#fq").value = "";
+    refreshAll();
+  }));
+}
+
+// ── drill-down ───────────────────────────────────────────
+// Any figure on screen should lead to the rows behind it. Cells are marked
+// with data-drill/data-val and handled here by delegation — no inline
+// onclick, so a client called O'Brien can't break the markup.
+function showPage(name) { document.querySelector(`.nav-item[data-page="${name}"]`)?.click(); }
+
+let pendingInvoice = null;                 // opened once the list has loaded
+function goInvoice(no) { pendingInvoice = no; showPage("invoices"); }
+
+function drillClient(name) {
+  const sel = $("#fClient");
+  if (sel && ![...sel.options].some(o => o.value === name)) sel.add(new Option(name, name));
+  filters.client = name; if (sel) sel.value = name;
+  showPage("register"); refreshAll();
+}
+function drillType(t) {
+  if (isCommDim()) {
+    const sel = $("#fCommType");
+    const match = [...sel.options].find(o => o.value.toLowerCase() === String(t).toLowerCase());
+    filters.commType = match ? match.value : t;
+    sel.value = filters.commType;
+  } else { filters.q = t; $("#fq").value = t; }
+  showPage("register"); refreshAll();
+}
+function drillSearch(q) { filters.q = q; $("#fq").value = q; showPage("register"); refreshAll(); }
+
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-drill]"); if (!el) return;
+  const v = el.dataset.val;
+  ({ invoice: goInvoice, client: drillClient, type: drillType, q: drillSearch })[el.dataset.drill]?.(v);
+});
+
+/** A clickable cell. `title` gets the hover summary where we have one. */
+const drill = (kind, value, text, title) =>
+  `<span class="lnk${kind === "invoice" ? " lnk-inv" : ""}" data-drill="${kind}" data-val="${escA(value)}"${
+    title ? ` title="${escA(title)}"` : ""}>${text}</span>`;
+
+/** Hover summary for a client, from the breakdown the API already sent. */
+function clientTip(name) {
+  const c = (CURRENT && CURRENT.clients || []).find(x => x.client === name);
+  if (!c) return "Click to filter to this client";
+  const bits = [`${c.invoices} invoice${c.invoices === 1 ? "" : "s"}`, `${money(c.amount)} sales`];
+  if (c.commissionValue !== undefined) bits.push(`${money(c.commissionValue)} commission`);
+  return bits.join(" · ") + " — click to filter";
+}
+
 const esc = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+// For values that land INSIDE an attribute. esc() alone leaves quotes intact,
+// so a client written as JAS"MIN would close the attribute early and swallow
+// the rest of the tag. Excel data is not trusted input.
+const escA = (s) => esc(s).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const money = (n) => CUR + (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const grams = (n) => (n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 }) + " g";
 // commission rate: 0.05 -> "5%", 50 -> "₱50/g"
@@ -184,7 +256,7 @@ async function load() {
   if (data.filterOptions) {
     const sel = $("#fClient"), cur = filters.client;
     sel.innerHTML = `<option value="">All clients</option>` +
-      data.filterOptions.clients.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
+      data.filterOptions.clients.map(c => `<option value="${escA(c)}">${esc(c)}</option>`).join("");
     sel.value = cur && data.filterOptions.clients.includes(cur) ? cur : "";
   }
   renderKPIs(); renderCharts(); renderTables();
@@ -212,6 +284,18 @@ function renderKPIs() {
 }
 
 function mk(id, cfg) { if (charts[id]) charts[id].destroy(); charts[id] = new Chart($("#"+id), cfg); }
+
+/* Charts drill too: clicking a bar or a slice filters to what it represents.
+   `fn` receives the label under the cursor. */
+function clickable(fn) {
+  return {
+    onClick: (evt, els, chart) => {
+      if (!els.length) return;
+      fn(chart.data.labels[els[0].index]);
+    },
+    onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? "pointer" : "default"; },
+  };
+}
 function renderCharts() {
   const tick = cssVar("--muted") || "#78716c", grid = cssVar("--border") || "rgba(0,0,0,.06)";
   const tt = $("#typeChartTitle"); if (tt) tt.textContent = "Sales by " + typeLabel();
@@ -227,17 +311,17 @@ function renderCharts() {
 
   const types = CURRENT.types.slice(0,8);
   mk("chType", { type: "doughnut", data: { labels: types.map(t=>t.itemType), datasets: [{ data: types.map(t=>t.amount), backgroundColor: PIE, borderWidth: 0 }] },
-    options: { responsive: true, maintainAspectRatio: false, cutout: "62%", plugins: { legend: { position: "right", labels: { color: cssVar("--muted2"), boxWidth: 12, font:{size:11} } } } } });
+    options: { ...clickable(drillType), responsive: true, maintainAspectRatio: false, cutout: "62%", plugins: { legend: { position: "right", labels: { color: cssVar("--muted2"), boxWidth: 12, font:{size:11} } } } } });
 
   const cl = CURRENT.clients.slice(0,10);
   mk("chClient", { type: "bar", data: { labels: cl.map(c=>c.client), datasets: [{ data: cl.map(c=>c.amount), backgroundColor: ACCENT, borderRadius: 4 }] },
-    options: { responsive: true, maintainAspectRatio: false, indexAxis: "y", plugins: { legend: { display: false } }, scales: { x:{ticks:{color:tick},grid:{color:grid}}, y:{ticks:{color:tick,font:{size:11}},grid:{display:false}} } } });
+    options: { ...clickable(drillClient), responsive: true, maintainAspectRatio: false, indexAxis: "y", plugins: { legend: { display: false } }, scales: { x:{ticks:{color:tick},grid:{color:grid}}, y:{ticks:{color:tick,font:{size:11}},grid:{display:false}} } } });
 
   $("#commCard").hidden = !hasComm;
   if (hasComm) {
     const cc = [...CURRENT.clients].sort((a,b)=>(b.commissionValue||0)-(a.commissionValue||0)).slice(0,10);
     mk("chComm", { type: "bar", data: { labels: cc.map(c=>c.client), datasets: [{ data: cc.map(c=>c.commissionValue||0), backgroundColor: TEAL, borderRadius: 4 }] },
-      options: { responsive: true, maintainAspectRatio: false, indexAxis: "y", plugins: { legend: { display: false } }, scales: { x:{ticks:{color:tick},grid:{color:grid}}, y:{ticks:{color:tick,font:{size:11}},grid:{display:false}} } } });
+      options: { ...clickable(drillClient), responsive: true, maintainAspectRatio: false, indexAxis: "y", plugins: { legend: { display: false } }, scales: { x:{ticks:{color:tick},grid:{color:grid}}, y:{ticks:{color:tick,font:{size:11}},grid:{display:false}} } } });
   }
 }
 
@@ -306,19 +390,34 @@ function renderTables() {
   });
   const foot = `<tfoot><tr>${footCells.join("")}</tr></tfoot>`;
 
-  table("#tblRegister", regCols, CURRENT.rows, (r,k,kind) => kind==="num" ? (k==="weight" ? (r[k]?grams(r[k]):"N/A") : (r[k]?money(r[k]):"N/A")) : (k==="commissionRate" ? fmtRate(r[k]) : disp(r[k])), foot);
+  // Cell renderer for the register. Identifier columns become drill-throughs:
+  // invoice -> that invoice, client -> filter, PJ/item code -> search.
+  const regCell = (r, k, kind) => {
+    if (kind === "num") return k === "weight" ? (r[k] ? grams(r[k]) : "N/A") : (r[k] ? money(r[k]) : "N/A");
+    if (k === "commissionRate") return fmtRate(r[k]);
+    const text = disp(r[k]);
+    if (text === "N/A") return text;
+    if (k === "invoice") return drill("invoice", r[k], text, "Open invoice " + r[k]);
+    if (k === "client")  return drill("client", r[k], text, clientTip(r[k]));
+    if (k === "pjCode" || k === "itemCode") return drill("q", r[k], text, "Find every row with this code");
+    if (k === "commissionType" || k === "itemType") return drill("type", r[k], text, "Filter to " + text);
+    return text;
+  };
+  table("#tblRegister", regCols, CURRENT.rows, regCell, foot);
 
   const c0 = CURRENT.clients[0] || {};
   const clientCols = [["client","Client"],["invoices","Invoices","num"],["amount","Sales","num"]];
   if ("commissionValue" in c0) clientCols.push(["commissionValue","Commission","num"]);
   if ("cost" in c0) clientCols.push(["cost","Cost","num"]);
   if ("margin" in c0) clientCols.push(["margin","Margin","num"]);
-  table("#tblClients", clientCols, CURRENT.clients, (r,k,kind) => kind==="num" ? (k==="invoices"?r[k]:money(r[k])) : esc(r[k]));
+  table("#tblClients", clientCols, CURRENT.clients, (r,k,kind) => kind==="num"
+    ? (k==="invoices" ? drill("client", r.client, r[k], `See ${r.client}'s ${r[k]} invoices`) : money(r[k]))
+    : drill("client", r[k], esc(r[k]), clientTip(r[k])));
 
   const t0 = CURRENT.types[0] || {};
   const typeCols = [["itemType", isCommDim() ? "Commission type" : "Item type"],["count","Items","num"],["weight","Weight","num"],["amount","Sales","num"]];
   if ("commissionValue" in t0) typeCols.push(["commissionValue","Commission","num"]);
-  table("#tblTypes", typeCols, CURRENT.types, (r,k,kind) => kind==="num" ? (k==="count"?r[k]:k==="weight"?grams(r[k]):money(r[k])) : esc(r[k]));
+  table("#tblTypes", typeCols, CURRENT.types, (r,k,kind) => kind==="num" ? (k==="count"?r[k]:k==="weight"?grams(r[k]):money(r[k])) : drill("type", r[k], esc(r[k]), "Filter to " + r[k]));
 }
 
 function downloadCSV() {
@@ -336,7 +435,11 @@ let currentInvoice = null;
 async function loadInvoices() {
   const d = await (await fetch("/api/invoices?" + filterQS().toString())).json();
   $("#ncInvoices").textContent = (d.invoices || []).length;
-  if (!d.invoices || !d.invoices.length) { $("#invList").innerHTML = `<div class="page-sub" style="padding:16px;">No invoices for this partner.</div>`; return; }
+  if (!d.invoices || !d.invoices.length) {
+    pendingInvoice = null;
+    $("#invList").innerHTML = `<div class="page-sub" style="padding:16px;">No invoices match the current filters.</div>`;
+    return;
+  }
   $("#invList").innerHTML = d.invoices.map(inv => `
     <div class="inv-row" data-reserve="${esc(inv.reserve)}" onclick="openInvoice('${inv.reserve.replace(/'/g,"\\'")}')">
       <div class="inv-row-top"><span class="inv-res">${esc(inv.reserve)}</span>${
@@ -345,6 +448,13 @@ async function loadInvoices() {
       <div class="inv-row-sub">${esc(inv.clients.join(", ")) || "N/A"}</div>
       <div class="inv-row-meta"><span>${inv.date || "N/A"}</span><span>${inv.count} item${inv.count>1?"s":""}</span><span class="mono">${money(inv.amount)}</span></div>
     </div>`).join("");
+
+  // Someone clicked an invoice number elsewhere — open it now the list is here.
+  if (pendingInvoice) {
+    const no = pendingInvoice; pendingInvoice = null;
+    await openInvoice(no);
+    document.querySelector(`.inv-row.active`)?.scrollIntoView({ block: "center" });
+  }
 }
 
 async function openInvoice(reserve) {
@@ -364,7 +474,15 @@ async function openInvoice(reserve) {
   if ("commissionRate" in i0) cols.push(["commissionRate","Comm. rate"]);
   if ("commissionValue" in i0) cols.push(["commissionValue","Commission amount","num"]);
   cols.unshift(["__n","#"]);
-  const cell = (it,k,kind) => kind==="num" ? (k==="weight" ? (it[k]?grams(it[k]):"N/A") : (it[k]?money(it[k]):"N/A")) : (k==="commissionRate" ? fmtRate(it[k]) : disp(it[k]));
+  const cell = (it, k, kind) => {
+    if (kind === "num") return k === "weight" ? (it[k] ? grams(it[k]) : "N/A") : (it[k] ? money(it[k]) : "N/A");
+    if (k === "commissionRate") return fmtRate(it[k]);
+    const text = disp(it[k]);
+    if (text === "N/A") return text;
+    if (k === "pjCode" || k === "itemCode") return drill("q", it[k], text, "Find every row with this code");
+    if (k === "commissionType" || k === "itemType") return drill("type", it[k], text, "Filter to " + text);
+    return text;
+  };
   const head = `<thead><tr>${cols.map(c=>`<th class="${c[2]==='num'?'num':''}">${c[1]}</th>`).join("")}</tr></thead>`;
   const body = `<tbody>${d.items.map((it,i)=>`<tr>${cols.map(c=>`<td class="${c[2]==='num'?'num':''}${c[0]==='__n'?' rownum':''}">${c[0]==="__n" ? (i+1) : cell(it,c[0],c[2])}</td>`).join("")}</tr>`).join("")}</tbody>`;
 
@@ -387,7 +505,9 @@ async function openInvoice(reserve) {
            onclick="editInvoice('${d.reserve.replace(/'/g,"\\'")}')">Edit invoice</button>` : ""}
       <div class="inv-eyebrow">Invoice no.${d.source === "manual" ? ' <span class="pill-manual">manual</span>' : ""}</div>
       <div class="inv-reserve">${esc(d.reserve)}</div>
-      <div class="inv-headmeta">${d.date || "N/A"} · ${esc(d.clients.join(", ")) || "N/A"} · ${t.count} item${t.count>1?"s":""}</div>
+      <div class="inv-headmeta">${d.date || "N/A"} · ${
+        d.clients.length ? d.clients.map(c => drill("client", c, esc(c), clientTip(c))).join(", ") : "N/A"
+      } · ${t.count} item${t.count>1?"s":""}</div>
     </div>
     <div class="inv-body">
       <div class="inv-items">
@@ -525,6 +645,18 @@ async function openUpload() {
   updateUploadCurrent();
 }
 function closeModals() { $("#ovl").classList.remove("open"); $("#modal").classList.remove("open"); $("#pwModal").classList.remove("open"); $("#invModal").classList.remove("open"); }
+
+// Esc closes, Ctrl/Cmd+Enter saves — a data-entry screen that needs the mouse
+// for every save is a slow one.
+document.addEventListener("keydown", (e) => {
+  const open = document.querySelector(".modal.open");
+  if (!open) return;
+  if (e.key === "Escape") { e.preventDefault(); closeModals(); }
+  else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    open.querySelector(".btn-primary")?.click();
+  }
+});
 $("#uploadBtn")?.addEventListener("click", openUpload);
 $("#uploadPartner")?.addEventListener("change", updateUploadCurrent);
 $("#doUpload")?.addEventListener("click", async () => {
@@ -560,16 +692,18 @@ boot();
 let editingInvoiceNo = null;   // null = creating a new one
 let lineItems = [];
 
+// [key, header, kind, column width]. The widths are what keep every field
+// readable at once instead of collapsing into a horizontal scroll.
 const LINE_COLS = [
-  ["pjCode", "PJ code", "text"],
-  ["itemCode", "Item code", "text"],
-  ["itemType", "Type", "text"],
-  ["supplier", "Supplier", "text"],
-  ["weight", "Weight (g)", "num"],
-  ["supplierPrice", "Capital", "num"],
-  ["amount", "Item amount", "num"],
-  ["commissionType", "Comm. type", "select"],
-  ["commissionRate", "Rate", "num"],
+  ["pjCode", "PJ code", "text", 108],
+  ["itemCode", "Item code", "text", 108],
+  ["itemType", "Type", "text", 84],
+  ["supplier", "Supplier", "text", 108],
+  ["weight", "Weight (g)", "num", 82],
+  ["supplierPrice", "Capital", "num", 94],
+  ["amount", "Item amount", "num", 104],
+  ["commissionType", "Comm. type", "select", 96],
+  ["commissionRate", "Rate", "num", 76],
 ];
 
 function blankLine() {
@@ -592,9 +726,17 @@ const lineCommission = (it) =>
     ? Number(it.commissionValue) : calcCommission(it);
 
 function renderLines() {
-  const head = `<thead><tr><th style="width:26px"></th>${
+  const cols = `<colgroup><col style="width:30px">${
+    LINE_COLS.map(c => `<col style="width:${c[3]}px">`).join("")
+  }<col style="width:106px"><col style="width:30px"></colgroup>`;
+
+  const head = `<thead><tr><th></th>${
     LINE_COLS.map(c => `<th class="${c[2]==="num"?"num":""}">${c[1]}</th>`).join("")
-  }<th class="num">Commission</th><th style="width:26px"></th></tr></thead>`;
+  }<th class="num">Commission</th><th></th></tr></thead>`;
+
+  const PH = { pjCode: "PJ0000", itemCode: "code", itemType: "e.g. RING",
+               supplier: "supplier", weight: "0.00", supplierPrice: "0.00",
+               amount: "0.00", commissionRate: "0.05" };
 
   const body = lineItems.map((it, i) => `<tr>
     <td class="rownum">${i + 1}</td>
@@ -606,14 +748,16 @@ function renderLines() {
         </select></td>`;
       }
       return `<td class="${kind==="num"?"num":""}"><input data-i="${i}" data-k="${k}"
-        type="${kind==="num"?"number":"text"}" step="any" value="${esc(it[k])}"></td>`;
+        type="${kind==="num"?"number":"text"}" step="any" value="${escA(it[k])}"
+        placeholder="${PH[k] || ""}"></td>`;
     }).join("")}
-    <td class="num"><input data-i="${i}" data-k="commissionValue" type="number" step="any"
-        placeholder="${lineCommission(it).toFixed(2)}" value="${esc(it.commissionValue)}"></td>
+    <td class="num calc-cell"><input data-i="${i}" data-k="commissionValue" type="number" step="any"
+        title="Calculated automatically — type here only to override it"
+        placeholder="${lineCommission(it).toFixed(2)}" value="${escA(it.commissionValue)}"></td>
     <td><span class="lnk-del" onclick="removeLine(${i})" title="Remove line">×</span></td>
   </tr>`).join("");
 
-  $("#invItems").innerHTML = head + `<tbody>${body}</tbody>`;
+  $("#invItems").innerHTML = cols + head + `<tbody>${body}</tbody>`;
   $("#invItems").querySelectorAll("input,select").forEach(el =>
     el.addEventListener("input", () => {
       lineItems[+el.dataset.i][el.dataset.k] = el.value;
@@ -625,7 +769,7 @@ function renderLines() {
         const k = active && active.dataset ? active.dataset.k : null;
         renderLines();
         if (i != null) {
-          const back = $(`#fItems [data-i="${i}"][data-k="${k}"]`);
+          const back = $(`#invItems [data-i="${i}"][data-k="${k}"]`);
           if (back) { back.focus(); if (back.setSelectionRange && back.type==="text") back.setSelectionRange(9999,9999); }
         }
       }
@@ -640,8 +784,9 @@ function renderTotals() {
   $("#invTotals").innerHTML =
     `<span>${lineItems.length} line${lineItems.length===1?"":"s"}</span>` +
     `<span>Weight <b>${grams(weight)}</b></span>` +
+    `<span class="tot-spacer"></span>` +
     `<span>Item amount <b>${money(amount)}</b></span>` +
-    `<span>Commission <b>${money(comm)}</b></span>`;
+    `<span class="tot-comm">Commission <b>${money(comm)}</b></span>`;
 }
 
 function removeLine(i) { lineItems.splice(i, 1); if (!lineItems.length) lineItems.push(blankLine()); renderLines(); }
@@ -654,6 +799,10 @@ function openInvoiceEditor(existing) {
   $("#invNo").value = existing ? existing.invoice : "";
   $("#invClient").value = existing ? existing.client : "";
   $("#invDate").value    = existing ? existing.date : new Date().toISOString().slice(0, 10);
+  // Suggest clients we already have, so the same person isn't typed three
+  // different ways and split across three rows in the By-client report.
+  const known = (CURRENT && CURRENT.filterOptions ? CURRENT.filterOptions.clients : []) || [];
+  $("#clientList").innerHTML = known.map(c => `<option value="${escA(c)}">`).join("");
   lineItems = existing && existing.items.length
     ? existing.items.map(it => ({ ...it,
         commissionValue: "",                      // blank = use the calculated value
@@ -661,9 +810,24 @@ function openInvoiceEditor(existing) {
     : [blankLine()];
   renderLines();
   $("#ovl").classList.add("open"); $("#invModal").classList.add("open");
+  $("#invModal .modal-body").scrollTop = 0;
+  setTimeout(() => (existing ? $("#invItems input") : $("#invNo"))?.focus(), 30);
 }
 
-$("#btnAddLine")?.addEventListener("click", () => { lineItems.push(blankLine()); renderLines(); });
+$("#btnAddLine")?.addEventListener("click", () => {
+  lineItems.push(blankLine()); renderLines();
+  const wrap = $(".inv-items-wrap"); if (wrap) wrap.scrollTop = wrap.scrollHeight;
+  $(`#invItems [data-i="${lineItems.length - 1}"]`)?.focus();
+});
+
+// Most invoices are several near-identical lines; copying the last one beats
+// retyping the supplier and rate every time.
+$("#btnDupLine")?.addEventListener("click", () => {
+  const last = lineItems[lineItems.length - 1];
+  lineItems.push(last ? { ...last, commissionValue: "" } : blankLine());
+  renderLines();
+  const wrap = $(".inv-items-wrap"); if (wrap) wrap.scrollTop = wrap.scrollHeight;
+});
 $("#btnNewInvoice")?.addEventListener("click", () => openInvoiceEditor(null));
 
 $("#btnSaveInvoice")?.addEventListener("click", async () => {
