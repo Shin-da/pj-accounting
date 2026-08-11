@@ -92,6 +92,15 @@ document.addEventListener("click", (e) => {
   ({ invoice: goInvoice, client: drillClient, type: drillType, q: drillSearch })[el.dataset.drill]?.(v);
 });
 
+/** Commission type rendered as a coloured pill — gold for GOLD, teal for
+    JEWELRY — so the category is readable from the colour in the table too,
+    not only in the chart. */
+function typePill(value, text) {
+  const t = String(value || "").toUpperCase();
+  const cls = t.includes("GOLD") ? " t-gold" : t.includes("JEWEL") ? " t-jewelry" : "";
+  return `<span class="pill-type${cls}">${text}</span>`;
+}
+
 /** A clickable cell. `title` gets the hover summary where we have one. */
 const drill = (kind, value, text, title) =>
   `<span class="lnk${kind === "invoice" ? " lnk-inv" : ""}" data-drill="${kind}" data-val="${escA(value)}"${
@@ -119,8 +128,40 @@ const fmtRate = (v) => { const n = parseFloat(v); if (isNaN(n)) return "N/A"; re
 const BLANKISH = new Set(["", "-", "—", "–", "N/A", "NA", "n/a"]);
 const disp = (v) => { const s = String(v ?? "").trim(); return BLANKISH.has(s) ? "N/A" : esc(s); };
 const cssVar = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
-const ACCENT = "#4f46e5", TEAL = "#0d9488";
-const PIE = ["#4f46e5","#0d9488","#d97706","#16a34a","#dc2626","#7c3aed","#0891b2","#db2777"];
+
+/* ── chart colours ────────────────────────────────────────
+   Read from the stylesheet, never hardcoded, so switching to dark mode
+   actually recolours the data. These used to be literal hex: indigo-600 sits
+   at 2.78:1 on the dark surface, under the 3:1 floor for graphics, which made
+   the sales series nearly invisible at night.
+   applyTheme() re-renders the charts, so these are re-read on every switch. */
+const C = (name, fallback) => cssVar(name) || fallback;
+const seriesSales   = () => C("--c-sales", "#4f46e5");
+const seriesJewelry = () => C("--c-jewelry", "#0f766e");
+const seriesGold    = () => C("--c-gold", "#a87a2b");
+const ramp = () => [1,2,3,4,5,6,7,8].map(i => C("--c-" + i, "#4f46e5"));
+
+/* GOLD and JEWELRY are the commission types in the data, so they get a fixed
+   colour rather than whichever ramp slot they happen to sort into — otherwise
+   the same category changes colour when the ordering changes. */
+function typeColor(label) {
+  const t = String(label || "").toUpperCase();
+  if (t.includes("GOLD")) return seriesGold();
+  if (t.includes("JEWEL")) return seriesJewelry();
+  return null;
+}
+/** Colours for a set of category labels: named types keep their colour, the
+    rest fall through to the ramp. */
+function categoryColors(labels) {
+  const r = ramp();
+  let next = 0;
+  return labels.map(l => typeColor(l) || r[next++ % r.length]);
+}
+const hexA = (h, a) => {
+  const m = String(h).trim().replace("#", "");
+  if (m.length < 6) return h;
+  return `rgba(${parseInt(m.slice(0,2),16)},${parseInt(m.slice(2,4),16)},${parseInt(m.slice(4,6),16)},${a})`;
+};
 
 // ── theme ────────────────────────────────────────────────
 function applyTheme(t) { document.documentElement.dataset.theme = t; try { localStorage.setItem("rdr-theme", t); } catch(_){} if (CURRENT) renderCharts(); }
@@ -301,8 +342,9 @@ function renderCharts() {
   const tt = $("#typeChartTitle"); if (tt) tt.textContent = "Sales by " + typeLabel();
   const hasComm = CURRENT.kpi.commissionValue !== undefined;
   const m = CURRENT.months;
-  const ds = [{ label: "Sales", data: m.map(x=>x.amount), borderColor: ACCENT, backgroundColor: "rgba(79,70,229,.12)", fill: true, tension: .35, borderWidth: 2, pointRadius: 2, yAxisID: "y" }];
-  if (hasComm) ds.push({ label: "Commission", data: m.map(x=>x.commissionValue||0), borderColor: TEAL, backgroundColor: "rgba(13,148,136,.10)", fill: true, tension: .35, borderWidth: 2, pointRadius: 2, yAxisID: "y1" });
+  const cSales = seriesSales(), cComm = seriesJewelry();
+  const ds = [{ label: "Sales", data: m.map(x=>x.amount), borderColor: cSales, backgroundColor: hexA(cSales, .12), fill: true, tension: .35, borderWidth: 2, pointRadius: 2, yAxisID: "y" }];
+  if (hasComm) ds.push({ label: "Commission", data: m.map(x=>x.commissionValue||0), borderColor: cComm, backgroundColor: hexA(cComm, .10), fill: true, tension: .35, borderWidth: 2, pointRadius: 2, yAxisID: "y1" });
   mk("chTime", { type: "line", data: { labels: m.map(x=>x.month), datasets: ds },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: cssVar("--muted2") } } },
       scales: { x: { ticks:{color:tick}, grid:{color:grid} },
@@ -310,17 +352,20 @@ function renderCharts() {
         y1: { position:"right", display: hasComm, ticks:{color:tick, callback:v=>CUR+(v/1000)+"k"}, grid:{drawOnChartArea:false} } } } });
 
   const types = CURRENT.types.slice(0,8);
-  mk("chType", { type: "doughnut", data: { labels: types.map(t=>t.itemType), datasets: [{ data: types.map(t=>t.amount), backgroundColor: PIE, borderWidth: 0 }] },
+  const typeLabels = types.map(t=>t.itemType);
+  mk("chType", { type: "doughnut", data: { labels: typeLabels, datasets: [{ data: types.map(t=>t.amount),
+      backgroundColor: categoryColors(typeLabels),
+      borderColor: cssVar("--surface") || "#fff", borderWidth: 2 }] },
     options: { ...clickable(drillType), responsive: true, maintainAspectRatio: false, cutout: "62%", plugins: { legend: { position: "right", labels: { color: cssVar("--muted2"), boxWidth: 12, font:{size:11} } } } } });
 
   const cl = CURRENT.clients.slice(0,10);
-  mk("chClient", { type: "bar", data: { labels: cl.map(c=>c.client), datasets: [{ data: cl.map(c=>c.amount), backgroundColor: ACCENT, borderRadius: 4 }] },
+  mk("chClient", { type: "bar", data: { labels: cl.map(c=>c.client), datasets: [{ data: cl.map(c=>c.amount), backgroundColor: seriesSales(), borderRadius: 4 }] },
     options: { ...clickable(drillClient), responsive: true, maintainAspectRatio: false, indexAxis: "y", plugins: { legend: { display: false } }, scales: { x:{ticks:{color:tick},grid:{color:grid}}, y:{ticks:{color:tick,font:{size:11}},grid:{display:false}} } } });
 
   $("#commCard").hidden = !hasComm;
   if (hasComm) {
     const cc = [...CURRENT.clients].sort((a,b)=>(b.commissionValue||0)-(a.commissionValue||0)).slice(0,10);
-    mk("chComm", { type: "bar", data: { labels: cc.map(c=>c.client), datasets: [{ data: cc.map(c=>c.commissionValue||0), backgroundColor: TEAL, borderRadius: 4 }] },
+    mk("chComm", { type: "bar", data: { labels: cc.map(c=>c.client), datasets: [{ data: cc.map(c=>c.commissionValue||0), backgroundColor: seriesJewelry(), borderRadius: 4 }] },
       options: { ...clickable(drillClient), responsive: true, maintainAspectRatio: false, indexAxis: "y", plugins: { legend: { display: false } }, scales: { x:{ticks:{color:tick},grid:{color:grid}}, y:{ticks:{color:tick,font:{size:11}},grid:{display:false}} } } });
   }
 }
@@ -400,7 +445,7 @@ function renderTables() {
     if (k === "invoice") return drill("invoice", r[k], text, "Open invoice " + r[k]);
     if (k === "client")  return drill("client", r[k], text, clientTip(r[k]));
     if (k === "pjCode" || k === "itemCode") return drill("q", r[k], text, "Find every row with this code");
-    if (k === "commissionType" || k === "itemType") return drill("type", r[k], text, "Filter to " + text);
+    if (k === "commissionType" || k === "itemType") return drill("type", r[k], typePill(r[k], text), "Filter to " + text);
     return text;
   };
   table("#tblRegister", regCols, CURRENT.rows, regCell, foot);
@@ -417,7 +462,7 @@ function renderTables() {
   const t0 = CURRENT.types[0] || {};
   const typeCols = [["itemType", isCommDim() ? "Commission type" : "Item type"],["count","Items","num"],["weight","Weight","num"],["amount","Sales","num"]];
   if ("commissionValue" in t0) typeCols.push(["commissionValue","Commission","num"]);
-  table("#tblTypes", typeCols, CURRENT.types, (r,k,kind) => kind==="num" ? (k==="count"?r[k]:k==="weight"?grams(r[k]):money(r[k])) : drill("type", r[k], esc(r[k]), "Filter to " + r[k]));
+  table("#tblTypes", typeCols, CURRENT.types, (r,k,kind) => kind==="num" ? (k==="count"?r[k]:k==="weight"?grams(r[k]):money(r[k])) : drill("type", r[k], typePill(r[k], esc(r[k])), "Filter to " + r[k]));
 }
 
 function downloadCSV() {
@@ -480,7 +525,7 @@ async function openInvoice(reserve) {
     const text = disp(it[k]);
     if (text === "N/A") return text;
     if (k === "pjCode" || k === "itemCode") return drill("q", it[k], text, "Find every row with this code");
-    if (k === "commissionType" || k === "itemType") return drill("type", it[k], text, "Filter to " + text);
+    if (k === "commissionType" || k === "itemType") return drill("type", it[k], typePill(it[k], text), "Filter to " + text);
     return text;
   };
   const head = `<thead><tr>${cols.map(c=>`<th class="${c[2]==='num'?'num':''}">${c[1]}</th>`).join("")}</tr></thead>`;
@@ -547,8 +592,8 @@ async function loadPortfolio() {
   $("#pfKpis").innerHTML = cards.map(c => `<div class="kpi-card"><div class="kpi-label">${c.label}</div><div class="kpi-value ${c.cls}">${c.value}</div></div>`).join("");
   const tick = cssVar("--muted"), grid = cssVar("--border");
   mk("chPartners", { type: "bar", data: { labels: d.partners.map(p=>p.name), datasets: [
-      { label: "Sales", data: d.partners.map(p=>p.amount), backgroundColor: ACCENT, borderRadius: 4 },
-      { label: "ONELIVE profit", data: d.partners.map(p=>p.onelive), backgroundColor: TEAL, borderRadius: 4 } ] },
+      { label: "Sales", data: d.partners.map(p=>p.amount), backgroundColor: seriesSales(), borderRadius: 4 },
+      { label: "ONELIVE profit", data: d.partners.map(p=>p.onelive), backgroundColor: seriesJewelry(), borderRadius: 4 } ] },
     options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: cssVar("--muted2") } } }, scales: { x:{ticks:{color:tick},grid:{display:false}}, y:{ticks:{color:tick,callback:v=>CUR+(v/1000)+"k"},grid:{color:grid}} } } });
   const cols = [["name","Partner"],["invoices","Invoices","num"],["amount","Sales","num"],["commissionValue","Commission","num"],["cost","Cost","num"],["margin","Margin","num"],["onelive","ONELIVE profit","num"]];
   table("#tblPortfolio", cols, d.partners, (r,k,kind)=> kind==="num" ? (k==="invoices"?r[k]:money(r[k])) : esc(r[k]));

@@ -59,10 +59,20 @@ async function fakeFetch(url) {
 }
 
 const html = fs.readFileSync(APP + "/public/index.html", "utf8");
-const dom = new JSDOM(html, { runScripts: "outside-only", url: "http://localhost/", pretendToBeVisual: true });
+// jsdom does not fetch <link rel=stylesheet>, so inline the real stylesheet.
+// Without this every cssVar() lookup returns "" and silently falls back to the
+// hardcoded defaults — which makes the colour assertions below pass on values
+// that never came from the theme at all.
+const css = fs.readFileSync(APP + "/public/style.css", "utf8");
+const dom = new JSDOM(html.replace("</head>", "<style>" + css + "</style></head>"),
+  { runScripts: "outside-only", url: "http://localhost/", pretendToBeVisual: true });
 const w = dom.window;
 w.fetch = fakeFetch;
-w.Chart = class { constructor(){} destroy(){} };   // charts aren't under test here
+const drawn = {};
+w.Chart = class {                       // records the config so we can inspect series colours
+  constructor(el, cfg){ drawn[el && el.id] = cfg; }
+  destroy(){}
+};
 w.alert = () => {}; w.confirm = () => true;
 w.Element.prototype.scrollIntoView = function(){};   // not implemented by jsdom
 w.eval(fs.readFileSync(APP + "/public/app.js", "utf8"));
@@ -150,6 +160,46 @@ const t = (name, cond, extra) => { if (!cond) ok = false;
   w.document.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   await wait();
   t("Esc closes the modal", !$("#invModal").classList.contains("open"));
+
+
+  // ── 7. theme-aware chart colours ──
+  t("stylesheet is loaded (guards every colour check below)",
+    w.getComputedStyle(w.document.documentElement).getPropertyValue("--c-sales").trim() === "#4f46e5",
+    JSON.stringify(w.getComputedStyle(w.document.documentElement).getPropertyValue("--c-sales")));
+
+  const seriesOf = (id) => {
+    const d = drawn[id] && drawn[id].data.datasets[0];
+    return d ? (d.borderColor || d.backgroundColor) : null;
+  };
+  const lightSales = seriesOf("chTime");
+  const lightPie = drawn.chType.data.datasets[0].backgroundColor.slice();
+  t("chart colours come from the stylesheet, not hex literals",
+    typeof lightSales === "string" && lightSales.length > 0, lightSales);
+
+  // GOLD must be gold and JEWELRY teal, regardless of ordering
+  const labels = drawn.chType.data.labels;
+  const gi = labels.indexOf("GOLD"), ji = labels.indexOf("JEWELRY");
+  t("GOLD slice uses the gold token", lightPie[gi] === "#a87a2b", lightPie[gi]);
+  t("JEWELRY slice uses the jewelry token", lightPie[ji] === "#0f766e", lightPie[ji]);
+  t("donut slices have a separating border",
+    drawn.chType.data.datasets[0].borderWidth === 2);
+
+  w.eval('applyTheme("dark")'); await wait();
+  const darkSales = seriesOf("chTime");
+  const darkPie = drawn.chType.data.datasets[0].backgroundColor;
+  t("switching to dark recolours the sales series", darkSales !== lightSales,
+    lightSales + " -> " + darkSales);
+  t("dark sales series is the light indigo", darkSales === "#818cf8", darkSales);
+  t("dark GOLD slice brightens", darkPie[gi] === "#e0b341", darkPie[gi]);
+  t("dark JEWELRY slice brightens", darkPie[ji] === "#2dd4bf", darkPie[ji]);
+  w.eval('applyTheme("light")'); await wait();
+
+  // ── 8. type pills carry the category colour into the tables ──
+  const pills = $$("#tblRegister .pill-type");
+  t("commission types render as coloured pills", pills.length === 2, pills.length + " pills");
+  t("gold and jewelry pills differ",
+    pills.length === 2 && pills[0].className !== pills[1].className,
+    pills.length === 2 ? pills[0].className + " / " + pills[1].className : "");
 
   console.log(ok ? "\nALL PASS" : "\nFAILURES");
   process.exit(ok ? 0 : 1);
