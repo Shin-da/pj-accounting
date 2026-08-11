@@ -98,7 +98,16 @@ function checkConnectionString(raw = CONNECTION_STRING) {
   if (/^\s|\s$/.test(s)) problems.push("It has leading or trailing whitespace — trim it.");
   if (/[\r\n]/.test(s)) problems.push("It contains a line break: the value was pasted across two lines.");
   if (/^["']|["']$/.test(s.trim())) problems.push("It is wrapped in quotes — Render stores the value literally, so remove them.");
-  if (/^\s*DATABASE_URL\s*=/i.test(s)) problems.push("It still starts with 'DATABASE_URL=' — paste only the value, not the whole line.");
+  // Copying the whole shell line is the single most common mistake, and it
+  // looks different in every shell. Catch all of them, not just the bare key.
+  //   PowerShell:  $env:DATABASE_URL="postgres://..."
+  //   bash/zsh:    export DATABASE_URL=postgres://...
+  //   cmd:         set DATABASE_URL=postgres://...
+  const shellPrefix = s.trim().match(/^(\$env:|export\s+|set\s+|SET\s+)?([A-Z_][A-Z0-9_]*)\s*=/i);
+  if (shellPrefix) {
+    problems.push(`It starts with '${shellPrefix[0].trim()}' — that is shell syntax for setting the ` +
+                  "variable. Render wants only the value: everything after the '=', without quotes.");
+  }
   if (/^\s*psql\b/i.test(s)) problems.push("This is a psql command, not a connection string. Copy the URI form instead.");
   if (/\[YOUR-PASSWORD\]|\[YOUR_PASSWORD\]|<password>/i.test(s)) problems.push("The [YOUR-PASSWORD] placeholder is still in it — substitute the real password.");
 
