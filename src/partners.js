@@ -1,19 +1,19 @@
 /*
- * Partners + their datasets.
+ * Partners and their uploaded datasets — PostgreSQL backed.
  *
- * Each partner (RDR, and future ones) has:
- *   - a record in partners.json (slug, name, visibility flags)
- *   - a parsed dataset in datasets/<slug>.json (from the admin's Excel upload)
+ * A partner (RDR, and future ones) has:
+ *   - a row in `partners` (slug, name, visibility flags)
+ *   - one or more rows in `datasets`, one per Excel upload, with the newest
+ *     marked is_current
+ *   - the line items in `records`, linked to a dataset
+ *
+ * Keeping old datasets means a bad upload can be rolled back instead of
+ * overwriting history — something the JSON-file version could not do.
  *
  * Visibility flags decide what a PARTNER user may see of their own data.
- * Admins and the owner always see everything. Default is privacy-safe:
- * sales + their commission, but not PJ's cost / margin / ONELIVE profit.
+ * Admins and the owner always see everything. Default is privacy-safe.
  */
-const fs = require("fs");
-const path = require("path");
-const { PARTNERS_JSON, DATASETS_DIR, LATEST_JSON } = require("../config");
-
-fs.mkdirSync(DATASETS_DIR, { recursive: true });
+const db = require("./db");
 
 const DEFAULT_FLAGS = { commission: true, cost: false, margin: false, onelive: false };
 
@@ -21,54 +21,151 @@ function slugify(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "partner";
 }
 
-function load() {
-  try { return JSON.parse(fs.readFileSync(PARTNERS_JSON, "utf8")); } catch (_) { return []; }
+// ── partners ─────────────────────────────────────────────
+async function listPartners() {
+  return db.query("SELECT slug, name, flags, created_at FROM partners ORDER BY created_at, slug");
 }
-function save(list) { fs.writeFileSync(PARTNERS_JSON, JSON.stringify(list, null, 2)); }
 
-function datasetPath(slug) { return path.join(DATASETS_DIR, slug + ".json"); }
-function loadDataset(slug) {
-  try { return JSON.parse(fs.readFileSync(datasetPath(slug), "utf8")); }
-  catch (_) { return { records: [], meta: null }; }
+async function getPartner(slug) {
+  return db.one("SELECT slug, name, flags, created_at FROM partners WHERE slug = $1", [slug]);
 }
-function saveDataset(slug, parsed) { fs.writeFileSync(datasetPath(slug), JSON.stringify(parsed)); }
 
-function listPartners() { return load(); }
-function getPartner(slug) { return load().find((p) => p.slug === slug) || null; }
+async function createPartner({ name, flags }) {
+  const base = slugify(name);
+  let slug = base, n = 1;
+  while (await getPartner(slug)) slug = base + "-" + (++n);
 
-function createPartner({ name, flags }) {
-  const list = load();
-  let slug = slugify(name), n = 1;
-  while (list.some((p) => p.slug === slug)) slug = slugify(name) + "-" + (++n);
-  const p = { slug, name: String(name || slug).trim(),
-    flags: { ...DEFAULT_FLAGS, ...(flags || {}) }, createdAt: new Date().toISOString() };
-  list.push(p); save(list);
-  return p;
+  return db.one(
+    `INSERT INTO partners (slug, name, flags) VALUES ($1, $2, $3)
+     RETURNING slug, name, flags, created_at`,
+    [slug, String(name || slug).trim(), JSON.stringify({ ...DEFAULT_FLAGS, ...(flags || {}) })]);
 }
-function updatePartner(slug, patch) {
-  const list = load();
-  const p = list.find((x) => x.slug === slug);
+
+async function updatePartner(slug, patch) {
+  const p = await getPartner(slug);
   if (!p) throw new Error("partner not found");
-  if (patch.name != null) p.name = String(patch.name).trim();
-  if (patch.flags) p.flags = { ...p.flags, ...patch.flags };
-  save(list);
-  return p;
+  const name  = patch.name != null ? String(patch.name).trim() : p.name;
+  const flags = patch.flags ? { ...p.flags, ...patch.flags } : p.flags;
+  return db.one(
+    `UPDATE partners SET name = $1, flags = $2 WHERE slug = $3
+     RETURNING slug, name, flags, created_at`,
+    [name, JSON.stringify(flags), slug]);
 }
 
-// One-time migration: if there are no partners yet, create RDR and move any
-// existing single dataset (latest.json) under it, so nothing is lost.
-function migrateIfNeeded() {
-  if (load().length) return;
-  const rdr = createPartner({ name: "RDR", flags: DEFAULT_FLAGS });
-  try {
-    if (fs.existsSync(LATEST_JSON) && !fs.existsSync(datasetPath(rdr.slug))) {
-      fs.copyFileSync(LATEST_JSON, datasetPath(rdr.slug));
-      console.log(" * migrated existing dataset -> partner 'rdr'");
+// ── datasets + records ───────────────────────────────────
+// Column order used for the bulk insert of line items.
+const REC_COLS = [
+  "dataset_id", "partner_slug", "row_no", "txn_date", "invoice", "client",
+  "pj_code", "item_code", "item_type", "supplier", "weight", "capital_per_gram",
+  "supplier_price", "amount", "onelive", "commission", "commission_type",
+  "commission_value", "sheet",
+];
+
+/** Convert a parsed record (camelCase, from parse.js) into a row array. */
+function recordToRow(datasetId, slug, r, i) {
+  return [
+    datasetId, slug, i + 1,
+    r.date || null, r.invoice || null, r.client || null,
+    r.pjCode || null, r.itemCode || null, r.itemType || null, r.supplier || null,
+    Number(r.weight) || 0, Number(r.capitalPerGram) || 0, Number(r.supplierPrice) || 0,
+    Number(r.amount) || 0, Number(r.onelive) || 0,
+    r.commission == null ? null : String(r.commission),
+    r.commissionType || null, Number(r.commissionValue) || 0, r.sheet || null,
+  ];
+}
+
+/** Convert a database row back into the camelCase shape the app expects. */
+function rowToRecord(row) {
+  return {
+    date: row.txn_date
+      ? (row.txn_date instanceof Date ? row.txn_date.toISOString().slice(0, 10) : String(row.txn_date).slice(0, 10))
+      : null,
+    invoice: row.invoice || "",
+    client: row.client || "",
+    pjCode: row.pj_code || "",
+    itemCode: row.item_code || "",
+    itemType: row.item_type || "",
+    supplier: row.supplier || "—",
+    weight: Number(row.weight) || 0,
+    capitalPerGram: Number(row.capital_per_gram) || 0,
+    supplierPrice: Number(row.supplier_price) || 0,
+    amount: Number(row.amount) || 0,
+    onelive: Number(row.onelive) || 0,
+    commission: row.commission == null ? "" : String(row.commission),
+    commissionType: row.commission_type || "",
+    commissionValue: Number(row.commission_value) || 0,
+    sheet: row.sheet || "",
+  };
+}
+
+/**
+ * Save a freshly parsed upload as the partner's current dataset.
+ * Runs in a transaction: either the whole upload lands, or none of it does.
+ */
+async function saveDataset(slug, parsed, opts = {}) {
+  return db.tx(async (client) => {
+    await client.query("UPDATE datasets SET is_current = FALSE WHERE partner_slug = $1", [slug]);
+
+    const ds = await client.query(
+      `INSERT INTO datasets (partner_slug, file_name, uploaded_by, meta, is_current)
+       VALUES ($1, $2, $3, $4, TRUE) RETURNING id`,
+      [slug, opts.fileName || (parsed.meta && parsed.meta.fileName) || null,
+       opts.uploadedBy || null, JSON.stringify(parsed.meta || {})]);
+    const datasetId = ds.rows[0].id;
+
+    // Bulk insert in chunks — one statement per ~500 rows keeps the query
+    // size sane while staying far faster than a round trip per row.
+    const rows = parsed.records || [];
+    const CHUNK = 500;
+    for (let start = 0; start < rows.length; start += CHUNK) {
+      const slice = rows.slice(start, start + CHUNK);
+      const values = [];
+      const tuples = slice.map((r, j) => {
+        const vals = recordToRow(datasetId, slug, r, start + j);
+        const ph = vals.map((_, k) => `$${values.length + k + 1}`);
+        values.push(...vals);
+        return `(${ph.join(",")})`;
+      });
+      await client.query(
+        `INSERT INTO records (${REC_COLS.join(",")}) VALUES ${tuples.join(",")}`, values);
     }
-  } catch (_) {}
+
+    return { datasetId, rows: rows.length };
+  });
+}
+
+/** The partner's current dataset, in the same shape the app used to read from JSON. */
+async function loadDataset(slug) {
+  const ds = await db.one(
+    `SELECT id, file_name, uploaded_at, meta FROM datasets
+     WHERE partner_slug = $1 AND is_current = TRUE
+     ORDER BY uploaded_at DESC LIMIT 1`, [slug]);
+  if (!ds) return { records: [], meta: null };
+
+  const rows = await db.query(
+    "SELECT * FROM records WHERE dataset_id = $1 ORDER BY row_no", [ds.id]);
+
+  const meta = { ...(ds.meta || {}) };
+  meta.uploadedAt = ds.uploaded_at instanceof Date ? ds.uploaded_at.toISOString() : ds.uploaded_at;
+  if (ds.file_name) meta.fileName = ds.file_name;
+  meta.rows = rows.length;
+
+  return { records: rows.map(rowToRecord), meta };
+}
+
+/** Upload history for a partner (newest first). */
+async function listDatasets(slug) {
+  return db.query(
+    `SELECT d.id, d.file_name, d.uploaded_at, d.uploaded_by, d.is_current,
+            COUNT(r.id)::int AS rows
+     FROM datasets d
+     LEFT JOIN records r ON r.dataset_id = d.id
+     WHERE d.partner_slug = $1
+     GROUP BY d.id, d.file_name, d.uploaded_at, d.uploaded_by, d.is_current
+     ORDER BY d.uploaded_at DESC`, [slug]);
 }
 
 module.exports = {
   DEFAULT_FLAGS, listPartners, getPartner, createPartner, updatePartner,
-  loadDataset, saveDataset, migrateIfNeeded, slugify,
+  loadDataset, saveDataset, listDatasets, slugify,
 };

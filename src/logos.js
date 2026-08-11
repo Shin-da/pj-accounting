@@ -1,59 +1,53 @@
 /*
- * Partner logos.
+ * Partner logos — stored in PostgreSQL.
  *
- * Two sources, checked in order:
- *   1. Uploaded by an admin  -> data/logos/<slug>.<ext>   (instant, but on a
- *      free host the data/ folder resets on redeploy)
- *   2. Committed to the repo -> public/logos/<slug>.<ext> (persists forever,
- *      because it ships with the code)
- *
- * So you can upload now and, once a logo is final, drop the same file into
- * public/logos/ and commit it so it survives deploys.
+ * Uploaded by an admin, shown in the header for whichever partner is being
+ * viewed. Falls back to a committed file in public/logos/<slug>.<ext> if no
+ * upload exists, so a logo can also ship with the code.
  */
 const fs = require("fs");
 const path = require("path");
-const { DATA_DIR } = require("../config");
+const db = require("./db");
 
-const UPLOAD_DIR = path.join(DATA_DIR, "logos");
-const INDEX_JSON = path.join(DATA_DIR, "logos.json");
 const STATIC_DIR = path.join(__dirname, "..", "public", "logos");
-
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-const EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
-              "image/gif": "gif", "image/svg+xml": "svg" };
-const MIME_BY_EXT = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
-                      webp: "image/webp", gif: "image/gif", svg: "image/svg+xml" };
-
-function load() { try { return JSON.parse(fs.readFileSync(INDEX_JSON, "utf8")); } catch (_) { return {}; } }
-function save(i) { fs.writeFileSync(INDEX_JSON, JSON.stringify(i, null, 2)); }
+const ALLOWED = {
+  "image/jpeg": 1, "image/png": 1, "image/webp": 1, "image/gif": 1, "image/svg+xml": 1,
+};
+const MIME_BY_EXT = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+  webp: "image/webp", gif: "image/gif", svg: "image/svg+xml",
+};
 const safe = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, "_");
 
-function setLogo(slug, buffer, mime) {
-  const ext = EXT[mime];
-  if (!ext) throw new Error("unsupported image type (use PNG, JPG, WEBP, GIF or SVG)");
-  const file = `${safe(slug)}.${ext}`;
-  fs.writeFileSync(path.join(UPLOAD_DIR, file), buffer);
-  const idx = load();
-  idx[slug] = { file, mime, uploadedAt: new Date().toISOString() };
-  save(idx);
-  return idx[slug];
+async function setLogo(partnerSlug, buffer, mime) {
+  if (!ALLOWED[mime]) throw new Error("unsupported image type (use PNG, JPG, WEBP, GIF or SVG)");
+  const row = await db.one(
+    `INSERT INTO logos (partner_slug, mime, bytes, uploaded_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (partner_slug)
+     DO UPDATE SET mime = EXCLUDED.mime, bytes = EXCLUDED.bytes, uploaded_at = NOW()
+     RETURNING uploaded_at`,
+    [partnerSlug, mime, buffer]);
+  return { uploadedAt: row.uploaded_at };
 }
 
-// Uploaded logo first, then a committed one in public/logos/.
-function getLogo(slug) {
-  const rec = load()[slug];
-  if (rec) {
-    const abs = path.join(UPLOAD_DIR, rec.file);
-    if (fs.existsSync(abs)) return { abs, mime: rec.mime, source: "upload" };
-  }
+/** Uploaded logo first, then a committed one in public/logos/. */
+async function getLogo(partnerSlug) {
+  const row = await db.one(
+    "SELECT mime, bytes, uploaded_at FROM logos WHERE partner_slug = $1", [partnerSlug]);
+  if (row) return { mime: row.mime, bytes: row.bytes, source: "db", uploadedAt: row.uploaded_at };
+
   for (const ext of Object.keys(MIME_BY_EXT)) {
-    const abs = path.join(STATIC_DIR, `${safe(slug)}.${ext}`);
-    if (fs.existsSync(abs)) return { abs, mime: MIME_BY_EXT[ext], source: "repo" };
+    const abs = path.join(STATIC_DIR, `${safe(partnerSlug)}.${ext}`);
+    if (fs.existsSync(abs)) {
+      return { mime: MIME_BY_EXT[ext], bytes: fs.readFileSync(abs), source: "repo" };
+    }
   }
   return null;
 }
 
-function hasLogo(slug) { return !!getLogo(slug); }
+async function hasLogo(partnerSlug) {
+  return !!(await getLogo(partnerSlug));
+}
 
 module.exports = { setLogo, getLogo, hasLogo };

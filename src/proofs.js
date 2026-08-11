@@ -1,52 +1,48 @@
 /*
- * Proof-of-invoice images.
+ * Proof-of-invoice images — stored in PostgreSQL.
  *
- * Admins upload one image per invoice (keyed by partner + reserve no.).
- * Files live in data/proofs/, indexed in data/proofs.json. On the free host
- * these reset on redeploy (like the rest of the data) — they persist once a
- * disk is attached.
+ * Admins upload one image per invoice (partner + reserve number).
+ * Keeping them in the database means there is ONE thing to back up, and
+ * nothing is lost when the app redeploys.
+ *
+ * If these ever grow large (thousands of photos), move the bytes to object
+ * storage (S3 / Backblaze B2) and keep just the URL in this table.
  */
-const fs = require("fs");
-const path = require("path");
-const { PROOFS_DIR, PROOFS_JSON } = require("../config");
+const db = require("./db");
 
-fs.mkdirSync(PROOFS_DIR, { recursive: true });
+const ALLOWED = { "image/jpeg": 1, "image/png": 1, "image/webp": 1, "image/gif": 1 };
 
-const EXT = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
-
-function load() { try { return JSON.parse(fs.readFileSync(PROOFS_JSON, "utf8")); } catch (_) { return {}; } }
-function save(idx) { fs.writeFileSync(PROOFS_JSON, JSON.stringify(idx, null, 2)); }
-
-const key = (partner, reserve) => `${partner}|${String(reserve).trim()}`;
-const safe = (s) => String(s).replace(/[^A-Za-z0-9._-]/g, "_");
-
-function setProof(partner, reserve, buffer, mime) {
-  const ext = EXT[mime];
-  if (!ext) throw new Error("unsupported image type (use JPG, PNG, WEBP, or GIF)");
-  const file = `${safe(partner)}__${safe(reserve)}.${ext}`;
-  fs.writeFileSync(path.join(PROOFS_DIR, file), buffer);
-  const idx = load();
-  idx[key(partner, reserve)] = { file, mime, uploadedAt: new Date().toISOString() };
-  save(idx);
-  return idx[key(partner, reserve)];
+async function setProof(partnerSlug, reserve, buffer, mime) {
+  if (!ALLOWED[mime]) throw new Error("unsupported image type (use JPG, PNG, WEBP or GIF)");
+  const row = await db.one(
+    `INSERT INTO proofs (partner_slug, reserve, mime, bytes, uploaded_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (partner_slug, reserve)
+     DO UPDATE SET mime = EXCLUDED.mime, bytes = EXCLUDED.bytes, uploaded_at = NOW()
+     RETURNING uploaded_at`,
+    [partnerSlug, String(reserve).trim(), mime, buffer]);
+  return { uploadedAt: row.uploaded_at };
 }
 
-function getProof(partner, reserve) {
-  const rec = load()[key(partner, reserve)];
-  if (!rec) return null;
-  const abs = path.join(PROOFS_DIR, rec.file);
-  if (!fs.existsSync(abs)) return null;
-  return { ...rec, abs };
+async function getProof(partnerSlug, reserve) {
+  const row = await db.one(
+    "SELECT mime, bytes, uploaded_at FROM proofs WHERE partner_slug = $1 AND reserve = $2",
+    [partnerSlug, String(reserve).trim()]);
+  if (!row) return null;
+  return { mime: row.mime, bytes: row.bytes, uploadedAt: row.uploaded_at };
 }
 
-function hasProof(partner, reserve) { return !!load()[key(partner, reserve)]; }
+async function hasProof(partnerSlug, reserve) {
+  const row = await db.one(
+    "SELECT 1 AS ok FROM proofs WHERE partner_slug = $1 AND reserve = $2",
+    [partnerSlug, String(reserve).trim()]);
+  return !!row;
+}
 
-// Set of reserve numbers (for a partner) that have a proof — for list badges.
-function proofSet(partner) {
-  const out = new Set();
-  const pre = partner + "|";
-  for (const k of Object.keys(load())) if (k.startsWith(pre)) out.add(k.slice(pre.length));
-  return out;
+/** Set of reserve numbers that have a proof — used for the list badges. */
+async function proofSet(partnerSlug) {
+  const rows = await db.query("SELECT reserve FROM proofs WHERE partner_slug = $1", [partnerSlug]);
+  return new Set(rows.map((r) => r.reserve));
 }
 
 module.exports = { setProof, getProof, hasProof, proofSet };

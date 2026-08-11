@@ -1,0 +1,104 @@
+-- =====================================================================
+-- pj-accounting — PostgreSQL schema
+--
+-- Replaces the JSON files under data/. Run once against your database:
+--     psql "$DATABASE_URL" -f db/schema.sql
+-- The app also applies this automatically on startup (see src/db.js),
+-- so you normally don't need to run it by hand.
+--
+-- Safe to re-run: everything is IF NOT EXISTS.
+-- =====================================================================
+
+-- ── accounts ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS users (
+    id            TEXT PRIMARY KEY,
+    email         TEXT NOT NULL UNIQUE,
+    name          TEXT NOT NULL,
+    role          TEXT NOT NULL,                      -- admin | owner | partner
+    partner_slug  TEXT,                               -- only for role = partner
+    password_hash TEXT NOT NULL,
+    password_salt TEXT NOT NULL,
+    disabled      BOOLEAN NOT NULL DEFAULT FALSE,
+    must_change   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── partners ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS partners (
+    slug        TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    -- what a partner user is allowed to see: commission / cost / margin / onelive
+    flags       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── uploads ──────────────────────────────────────────────────────────
+-- One row per Excel upload. Keeping history means we can see what a
+-- report looked like at a point in time, and roll back a bad upload.
+CREATE TABLE IF NOT EXISTS datasets (
+    id           BIGSERIAL PRIMARY KEY,
+    partner_slug TEXT NOT NULL REFERENCES partners(slug) ON DELETE CASCADE,
+    file_name    TEXT,
+    uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    uploaded_by  TEXT,
+    is_current   BOOLEAN NOT NULL DEFAULT TRUE,
+    meta         JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+CREATE INDEX IF NOT EXISTS idx_datasets_partner ON datasets(partner_slug, is_current);
+
+-- ── the actual line items ────────────────────────────────────────────
+-- Real rows, not a JSON blob: this is what lets filtering and totals move
+-- into SQL as the data grows.
+CREATE TABLE IF NOT EXISTS records (
+    id                BIGSERIAL PRIMARY KEY,
+    dataset_id        BIGINT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+    partner_slug      TEXT   NOT NULL,
+    row_no            INTEGER,
+    txn_date          DATE,
+    invoice           TEXT,
+    client            TEXT,
+    pj_code           TEXT,
+    item_code         TEXT,
+    item_type         TEXT,
+    supplier          TEXT,
+    weight            NUMERIC(14,3)  DEFAULT 0,
+    capital_per_gram  NUMERIC(14,2)  DEFAULT 0,
+    supplier_price    NUMERIC(16,2)  DEFAULT 0,
+    amount            NUMERIC(16,2)  DEFAULT 0,
+    onelive           NUMERIC(16,2)  DEFAULT 0,
+    commission        TEXT,                    -- the rate as written (e.g. "5%" or 50)
+    commission_type   TEXT,                    -- GOLD | JEWELRY
+    commission_value  NUMERIC(16,2)  DEFAULT 0,
+    sheet             TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_records_dataset  ON records(dataset_id);
+CREATE INDEX IF NOT EXISTS idx_records_partner  ON records(partner_slug);
+CREATE INDEX IF NOT EXISTS idx_records_date     ON records(txn_date);
+CREATE INDEX IF NOT EXISTS idx_records_invoice  ON records(invoice);
+CREATE INDEX IF NOT EXISTS idx_records_client   ON records(client);
+
+-- ── images ───────────────────────────────────────────────────────────
+-- Stored in the database so there is ONE thing to back up and nothing to
+-- lose on redeploy. If these ever grow large, move them to object storage
+-- (S3 / Backblaze B2) and keep only the URL here.
+CREATE TABLE IF NOT EXISTS proofs (
+    partner_slug TEXT NOT NULL REFERENCES partners(slug) ON DELETE CASCADE,
+    reserve      TEXT NOT NULL,
+    mime         TEXT NOT NULL,
+    bytes        BYTEA NOT NULL,
+    uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (partner_slug, reserve)
+);
+
+CREATE TABLE IF NOT EXISTS logos (
+    partner_slug TEXT PRIMARY KEY REFERENCES partners(slug) ON DELETE CASCADE,
+    mime         TEXT NOT NULL,
+    bytes        BYTEA NOT NULL,
+    uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ── app settings (session secret, etc.) ──────────────────────────────
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);

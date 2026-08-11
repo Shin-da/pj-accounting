@@ -1,36 +1,18 @@
 /*
- * RDR report configuration.
+ * Perfect Jewel accounting — configuration.
+ *
+ * Storage is PostgreSQL now (set DATABASE_URL); the old data/ file paths are
+ * gone. What's left here is the port, the currency, and the Excel column map.
  *
  * The Excel columns are still being finalised, so the parser maps headers
  * loosely (case/space-insensitive, with aliases). Add aliases here when the
  * sheet's wording changes — no other code needs to touch.
  */
-const path = require("path");
-const fs = require("fs");
-const crypto = require("crypto");
-
-const DATA_DIR = path.join(__dirname, "data");
-fs.mkdirSync(DATA_DIR, { recursive: true });
-
-// Secret for signing session cookies. From env in production; otherwise
-// generated once and persisted so logins survive restarts.
-function resolveSecret() {
-  if (process.env.AUTH_SECRET) return process.env.AUTH_SECRET;
-  const f = path.join(DATA_DIR, "secret.key");
-  try { return fs.readFileSync(f, "utf8"); }
-  catch (_) { const s = crypto.randomBytes(32).toString("hex"); fs.writeFileSync(f, s); return s; }
-}
 
 module.exports = {
   PORT: Number(process.env.PORT) || 5055,
-  DATA_DIR,
-  LATEST_JSON: path.join(DATA_DIR, "latest.json"),      // legacy single dataset
-  DATASETS_DIR: path.join(DATA_DIR, "datasets"),         // one JSON per partner
-  USERS_JSON: path.join(DATA_DIR, "users.json"),
-  PARTNERS_JSON: path.join(DATA_DIR, "partners.json"),
-  PROOFS_DIR: path.join(DATA_DIR, "proofs"),           // uploaded invoice images
-  PROOFS_JSON: path.join(DATA_DIR, "proofs.json"),      // reserve -> image index
-  AUTH_SECRET: resolveSecret(),
+  // How long a login lasts. The signing secret lives in the settings table
+  // (or the AUTH_SECRET env var) — see src/auth.js.
   SESSION_TTL_MS: 1000 * 60 * 60 * 24 * 14,              // 14 days
   CURRENCY: "₱",
 

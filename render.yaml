@@ -13,6 +13,11 @@ services:
         generateValue: true
       - key: NODE_VERSION
         value: "20"
+      # Postgres connection string. Create a database on Neon or Supabase
+      # (NOT Render's free Postgres — that one expires after 30 days) and
+      # paste the connection string here in the dashboard.
+      - key: DATABASE_URL
+        sync: false
     # NOTE: the free plan has NO persistent disk, so uploaded data + accounts
     # reset on each redeploy (the admin is re-seeded — watch the deploy logs for
     # the temp password — and you re-upload the Excel). To keep data across
