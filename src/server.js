@@ -592,6 +592,11 @@ function listenOn(i, partnerList) {
 /** Connect, apply the schema, seed the first accounts, then listen. */
 async function start() {
   try {
+    // Check the connection string BEFORE dialling out. A mangled URL otherwise
+    // shows up as a DNS error on a fragment of itself, or hangs long enough
+    // for the host's port scan to time out — neither of which points at the
+    // actual cause, which is nearly always a bad paste.
+    db.assertUsableConnectionString();
     await db.init();
     await auth.initSecret();
     await auth.seedIfEmpty("jeffmathewg@gmail.com");
