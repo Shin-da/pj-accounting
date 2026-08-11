@@ -17,6 +17,27 @@ const { SESSION_TTL_MS } = require("../config");
 const COOKIE = "pj_sess";
 const ROLES = ["admin", "owner", "partner"];
 
+/* ── the superadmin ───────────────────────────────────────
+ * Pinned to an email address in the environment, NOT to a row in the users
+ * table. That means the account cannot be created, demoted, disabled or
+ * archived through the app by anyone — changing who it is requires access to
+ * the Render environment, which is a deliberately harder door.
+ *
+ * There is no hidden account here: the address is in the environment, the
+ * behaviour is in this file, and it belongs in the handover documentation.
+ * An undocumented back door would be a liability, not a safeguard.
+ *
+ *     SUPERADMIN_EMAIL=someone@example.com
+ *
+ * If it is unset, nobody is superadmin and the app behaves exactly as before.
+ */
+const SUPERADMIN_EMAIL = String(process.env.SUPERADMIN_EMAIL || "").trim().toLowerCase();
+const isSuperadmin = (u) =>
+  !!SUPERADMIN_EMAIL && !!u && String(u.email || "").trim().toLowerCase() === SUPERADMIN_EMAIL;
+
+/** Roles that only a superadmin may create, modify or archive. */
+const PRIVILEGED = new Set(["admin", "owner"]);
+
 // Loaded once at startup by initSecret().
 let AUTH_SECRET = process.env.AUTH_SECRET || "";
 
@@ -77,7 +98,9 @@ function publicUser(u) {
   if (!u) return null;
   return { id: u.id, email: u.email, name: u.name, role: u.role,
            partner: u.partner_slug || null,
-           disabled: !!u.disabled, mustChange: !!u.must_change };
+           disabled: !!u.disabled, mustChange: !!u.must_change,
+           superadmin: isSuperadmin(u),
+           archivedAt: u.archived_at || null };
 }
 
 // ── account operations ───────────────────────────────────
@@ -87,15 +110,63 @@ async function findByEmail(email) {
 async function findById(id) {
   return db.one("SELECT * FROM users WHERE id = $1", [id]);
 }
-async function listUsers() {
-  const rows = await db.query("SELECT * FROM users ORDER BY created_at");
+async function listUsers({ includeArchived = false } = {}) {
+  const rows = await db.query(
+    `SELECT * FROM users ${includeArchived ? "" : "WHERE archived_at IS NULL"}
+     ORDER BY created_at`);
   return rows.map(publicUser);
+}
+
+/* ── who may act on whom ──────────────────────────────────
+ * One place, so the rules can't drift apart between routes.
+ * `actor` and `target` are publicUser shapes.
+ *
+ * Rules:
+ *   1. The superadmin is untouchable through the app — not by an admin, and
+ *      not by another superadmin (there is only ever one: the env var).
+ *   2. Only the superadmin may create, modify or archive admins and owners.
+ *      Ordinary admins manage partner accounts only, so no admin can lock a
+ *      colleague — or you — out of the system.
+ *   3. Nobody may disable or archive their own account. That is the mistake
+ *      that leaves a system with no way back in.
+ */
+function canManage(actor, target) {
+  if (!actor) return "not signed in";
+  if (isSuperadmin(target) ) return "the superadmin account cannot be changed from the app";
+  if (actor.id === target.id) return null;             // self-edits handled below
+  if (PRIVILEGED.has(target.role) && !actor.superadmin) {
+    return "only the superadmin can manage admin and owner accounts";
+  }
+  if (!actor.superadmin && actor.role !== "admin") return "forbidden";
+  return null;
+}
+
+/** Extra guard for the two actions that can lock someone out. */
+function canLockOut(actor, target, patch) {
+  const removing = patch.disabled === true || patch.archived === true;
+  if (!removing) return null;
+  if (actor.id === target.id) return "you cannot disable or archive your own account";
+  return null;
+}
+
+/** Role a user is allowed to hand out. */
+function canAssignRole(actor, role) {
+  if (PRIVILEGED.has(role) && !actor.superadmin) {
+    return "only the superadmin can create admin and owner accounts";
+  }
+  return null;
 }
 
 async function createUser({ email, name, role, partner, password, mustChange = true }) {
   if (!email || !password) throw new Error("email and password required");
   if (!ROLES.includes(role)) throw new Error("invalid role");
   if (await findByEmail(email)) throw new Error("email already exists");
+  // Refuse to hand out the superadmin address to an ordinary account: the
+  // env var decides who that is, and a row claiming it would be confusing.
+  if (SUPERADMIN_EMAIL && String(email).trim().toLowerCase() === SUPERADMIN_EMAIL &&
+      !PRIVILEGED.has(role)) {
+    throw new Error("that address is reserved for the superadmin");
+  }
 
   const salt = createSalt();
   const row = await db.one(
@@ -126,6 +197,15 @@ async function updateUser(id, patch) {
     put("partner_slug", role === "partner" ? (patch.partner || null) : null);
   }
   if (patch.disabled != null) put("disabled", !!patch.disabled);
+  if (patch.archived != null) {
+    // Archive = disable + hide from the list. The row itself is never removed,
+    // so the audit trail keeps naming a person the system still knows.
+    put("archived_at", patch.archived ? new Date() : null);
+    put("archived_by", patch.archived ? (patch.actor || null) : null);
+    // Restoring has to clear `disabled` as well, otherwise the account comes
+    // back to the list still locked out and the Restore button looks broken.
+    if (patch.disabled == null) put("disabled", !!patch.archived);
+  }
   if (patch.password) {
     const salt = createSalt();
     put("password_hash", hashPassword(patch.password, salt));
@@ -151,7 +231,7 @@ async function setOwnPassword(id, newPassword) {
 
 async function authenticate(email, password) {
   const u = await findByEmail(email);
-  if (!u || u.disabled) return null;
+  if (!u || u.disabled || u.archived_at) return null;
   if (!verifyPassword(password, u.password_salt, u.password_hash)) return null;
   return u;
 }
@@ -162,6 +242,7 @@ async function attachUser(req, res, next) {
     const sess = verifyToken(parseCookies(req)[COOKIE]);
     if (!sess) { req.user = null; return next(); }
     const u = await findById(sess.uid);
+    // archived accounts are disabled too, so this covers both
     req.user = u && !u.disabled ? publicUser(u) : null;
   } catch (e) {
     req.user = null;
@@ -175,9 +256,16 @@ function requireAuth(req, res, next) {
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "not signed in" });
+    // The superadmin passes every role gate — that is the whole point of it.
+    if (req.user.superadmin) return next();
     if (!roles.includes(req.user.role)) return res.status(403).json({ error: "forbidden" });
     next();
   };
+}
+function requireSuperadmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: "not signed in" });
+  if (!req.user.superadmin) return res.status(403).json({ error: "superadmin only" });
+  next();
 }
 function setSession(res, user) {
   res.cookie(COOKIE, signToken({ uid: user.id, iat: Date.now() }), {
@@ -224,7 +312,8 @@ async function seedIfEmpty(adminEmail) {
 }
 
 module.exports = {
-  ROLES, initSecret, attachUser, requireAuth, requireRole, setSession, clearSession,
-  authenticate, publicUser, createUser, updateUser, setOwnPassword, listUsers,
-  findById, findByEmail, seedIfEmpty,
+  ROLES, initSecret, attachUser, requireAuth, requireRole, requireSuperadmin,
+  setSession, clearSession, authenticate, publicUser, createUser, updateUser,
+  setOwnPassword, listUsers, findById, findByEmail, seedIfEmpty,
+  isSuperadmin, canManage, canLockOut, canAssignRole, SUPERADMIN_EMAIL,
 };

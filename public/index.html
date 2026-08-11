@@ -188,7 +188,11 @@
       <section class="page" id="page-users">
         <div class="overview-body">
           <div class="section-heading">Users</div>
-          <div class="table-wrap" style="border:1px solid var(--border); border-radius:var(--r-lg); margin-bottom:18px;"><table id="tblUsers"></table></div>
+          <div class="table-wrap" style="border:1px solid var(--border); border-radius:var(--r-lg); margin-bottom:18px;"><div class="users-bar">
+              <span id="userScopeHint" class="page-sub"></span>
+              <label class="arch-toggle"><input type="checkbox" id="showArchived"> Show archived</label>
+            </div>
+            <table id="tblUsers"></table></div>
           <div class="kpi-card" style="max-width:560px;">
             <div class="kpi-label">Add a user</div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;">

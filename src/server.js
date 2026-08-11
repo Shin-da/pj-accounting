@@ -496,20 +496,71 @@ app.get("/api/payment-proof", auth.requireAuth, wrap(async (req, res) => {
   res.end(proof.bytes);
 }));
 
-// ── user management (admin) ──────────────────────────────
+/* ── user management ──────────────────────────────────────
+ * Admins manage PARTNER accounts. Only the superadmin (pinned to
+ * SUPERADMIN_EMAIL in the environment) may touch admin and owner accounts,
+ * so no admin can lock another one — or the superadmin — out of the system.
+ *
+ * Every change is written to the audit log: these are the accounts that can
+ * move money, so "who granted this access" must always have an answer.
+ */
+async function logUserChange(actor, action, target, details) {
+  await db.query(
+    `INSERT INTO audit_log (actor, action, partner_slug, entity, details)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [actor.email, action, target.partner || null, target.email,
+     JSON.stringify(details || {})]);
+}
+
 app.get("/api/users", auth.requireRole("admin"), wrap(async (req, res) => {
-  res.json({ users: await auth.listUsers() });
+  // Archived accounts are hidden unless explicitly asked for — they are kept
+  // forever so the audit trail keeps naming a person the system knows.
+  const includeArchived = req.query.archived === "1";
+  res.json({
+    users: await auth.listUsers({ includeArchived }),
+    canManagePrivileged: !!req.user.superadmin,
+  });
 }));
 
 app.post("/api/users", auth.requireRole("admin"), wrap(async (req, res) => {
-  try { res.json({ ok: true, user: await auth.createUser(req.body || {}) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  const body = req.body || {};
+  const denied = auth.canAssignRole(req.user, body.role);
+  if (denied) return res.status(403).json({ error: denied });
+  try {
+    const user = await auth.createUser(body);
+    await logUserChange(req.user, "user.create", user, { role: user.role, partner: user.partner });
+    res.json({ ok: true, user });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 }));
 
 app.patch("/api/users/:id", auth.requireRole("admin"), wrap(async (req, res) => {
-  try { res.json({ ok: true, user: await auth.updateUser(req.params.id, req.body || {}) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  const patch = req.body || {};
+  const existing = auth.publicUser(await auth.findById(req.params.id));
+  if (!existing) return res.status(404).json({ error: "user not found" });
+
+  // Guards live in auth.js so the rules can't drift between routes.
+  const denied = auth.canManage(req.user, existing) ||
+                 auth.canLockOut(req.user, existing, patch) ||
+                 (patch.role != null ? auth.canAssignRole(req.user, patch.role) : null);
+  if (denied) return res.status(403).json({ error: denied });
+
+  try {
+    const user = await auth.updateUser(req.params.id, { ...patch, actor: req.user.email });
+    const action = patch.archived === true ? "user.archive"
+                 : patch.archived === false ? "user.restore"
+                 : patch.password ? "user.password_reset"
+                 : patch.disabled != null ? (patch.disabled ? "user.disable" : "user.enable")
+                 : "user.update";
+    await logUserChange(req.user, action, user,
+      { role: user.role, disabled: user.disabled, archived: !!user.archivedAt });
+    res.json({ ok: true, user });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 }));
+
+/* Deliberately no DELETE route. Removing a user is an archive, never a row
+   deletion: audit_log.actor and records.created_by hold an email as free
+   text, so a hard delete would leave the trail naming somebody the system no
+   longer knows. In an accounting system that answer has to survive. */
 
 // ── error handler (must be last) ─────────────────────────
 app.use((err, req, res, next) => {

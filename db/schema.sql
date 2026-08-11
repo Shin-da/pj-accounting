@@ -23,6 +23,13 @@ CREATE TABLE IF NOT EXISTS users (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Archived accounts stay in the table forever. `audit_log.actor` and
+-- `records.created_by` store an email as free text, so hard-deleting a user
+-- would leave the trail naming somebody the system no longer knows. In an
+-- accounting system "who recorded this payment" has to keep an answer.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS archived_by TEXT;
+
 -- ── partners ─────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS partners (
     slug        TEXT PRIMARY KEY,

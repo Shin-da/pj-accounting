@@ -652,22 +652,79 @@ $("#addPartner")?.addEventListener("click", async () => {
 });
 
 // ── admin: users ─────────────────────────────────────────
+let showArchivedUsers = false;
 async function loadUsers() {
-  const d = await (await fetch("/api/users")).json();
+  const d = await (await fetch("/api/users?archived=" + (showArchivedUsers ? "1" : "0"))).json();
+  const canPriv = !!d.canManagePrivileged;          // superadmin only
   const cols = [["name","Name"],["email","Email"],["role","Role"],["partner","Partner"],["status","Status"],["act","",""]];
-  const body = d.users.map(u => `<tr>
-    <td>${esc(u.name)}</td><td class="mono">${esc(u.email)}</td><td>${u.role}</td><td>${esc(u.partner||"—")}</td>
-    <td>${u.disabled?'<span class="status-pill sp-inactive">disabled</span>':'<span class="status-pill sp-active">active</span>'}${u.mustChange?' <span class="page-sub">(temp pw)</span>':''}</td>
-    <td><button class="btn btn-ghost btn-sm" onclick="resetPw('${u.id}')">Reset pw</button> <button class="btn btn-ghost btn-sm" onclick="toggleUser('${u.id}',${u.disabled?false:true})">${u.disabled?"Enable":"Disable"}</button></td>
-  </tr>`).join("");
+
+  const body = d.users.map(u => {
+    // Mirror the server rules so the UI doesn't offer buttons that will 403.
+    const privileged = u.role === "admin" || u.role === "owner";
+    const isSelf = ME && ME.user && ME.user.id === u.id;
+    const locked = u.superadmin || (privileged && !canPriv);
+    const acts = [];
+    if (!locked) acts.push(`<button class="btn btn-ghost btn-sm" onclick="resetPw('${u.id}')">Reset pw</button>`);
+    if (!locked && !isSelf) {
+      acts.push(`<button class="btn btn-ghost btn-sm" onclick="toggleUser('${u.id}',${u.disabled?false:true})">${u.disabled?"Enable":"Disable"}</button>`);
+      acts.push(u.archivedAt
+        ? `<button class="btn btn-ghost btn-sm" onclick="archiveUser('${u.id}',false)">Restore</button>`
+        : `<button class="btn btn-ghost btn-sm btn-danger-ghost" onclick="archiveUser('${u.id}',true)">Archive</button>`);
+    }
+    if (!acts.length) acts.push(`<span class="page-sub">${u.superadmin ? "protected" : isSelf ? "you" : "read-only"}</span>`);
+
+    const status = u.archivedAt ? '<span class="status-pill sp-inactive">archived</span>'
+      : u.disabled ? '<span class="status-pill sp-inactive">disabled</span>'
+      : '<span class="status-pill sp-active">active</span>';
+
+    return `<tr${u.archivedAt ? ' class="row-archived"' : ""}>
+      <td>${esc(u.name)}${u.superadmin ? ' <span class="pill-super" title="Pinned to SUPERADMIN_EMAIL in the environment; cannot be changed from the app">superadmin</span>' : ""}</td>
+      <td class="mono">${esc(u.email)}</td><td>${u.role}</td><td>${esc(u.partner||"—")}</td>
+      <td>${status}${u.mustChange?' <span class="page-sub">(temp pw)</span>':''}</td>
+      <td>${acts.join(" ")}</td>
+    </tr>`;
+  }).join("");
+
   $("#tblUsers").innerHTML = `<thead><tr>${cols.map(c=>`<th>${c[1]}</th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
+
+  // Only a superadmin can create admins/owners, so trim the role picker.
+  const roleSel = $("#nuRole");
+  if (roleSel) {
+    [...roleSel.options].forEach(o => {
+      if (o.value === "admin" || o.value === "owner") o.hidden = !canPriv;
+    });
+    if (!canPriv && (roleSel.value === "admin" || roleSel.value === "owner")) {
+      roleSel.value = "partner";
+      roleSel.dispatchEvent(new Event("change"));
+    }
+  }
+  const hint = $("#userScopeHint");
+  if (hint) hint.textContent = canPriv
+    ? "You are the superadmin: you can manage every account."
+    : "You can manage partner accounts. Admin and owner accounts are superadmin-only.";
+}
+
+async function archiveUser(id, archived) {
+  if (archived && !confirm("Archive this account? They lose access immediately, but their name stays on everything they recorded. You can restore them later.")) return;
+  const r = await (await fetch("/api/users/" + id, { method:"PATCH",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify({ archived }) })).json();
+  if (!r.ok) { alert(r.error || "Could not update."); return; }
+  loadUsers();
 }
 async function resetPw(id) {
   const pw = prompt("New temporary password for this user (min 6):"); if (!pw) return;
-  await fetch("/api/users/"+id, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ password: pw, mustChange: true }) });
-  alert("Password reset. Share it with the user; they'll be asked to change it."); loadUsers();
+  const r = await (await fetch("/api/users/"+id, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ password: pw, mustChange: true }) })).json();
+  alert(r.ok ? "Password reset. Share it with the user; they'll be asked to change it." : (r.error || "Could not reset."));
+  loadUsers();
 }
-async function toggleUser(id, disabled) { await fetch("/api/users/"+id, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ disabled }) }); loadUsers(); }
+async function toggleUser(id, disabled) {
+  const r = await (await fetch("/api/users/"+id, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ disabled }) })).json();
+  if (!r.ok) alert(r.error || "Could not update.");
+  loadUsers();
+}
+$("#showArchived")?.addEventListener("change", (e) => {
+  showArchivedUsers = e.target.checked; loadUsers();
+});
 $("#nuRole")?.addEventListener("change", () => { $("#nuPartner").style.display = $("#nuRole").value === "partner" ? "" : "none"; });
 $("#addUser")?.addEventListener("click", async () => {
   const body = { name: $("#nuName").value.trim(), email: $("#nuEmail").value.trim(), role: $("#nuRole").value,
