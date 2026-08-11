@@ -36,6 +36,17 @@ app.use(express.static(path.join(__dirname, "..", "public"), {
   setHeaders: (res) => res.setHeader("Cache-Control", "no-store"),
 }));
 
+// ── health ───────────────────────────────────────────────
+// Point the keep-alive cron job at THIS, not /api/me. It runs a real query,
+// which keeps both the web service and the database awake. A managed Postgres
+// on a free tier (Supabase, Neon) pauses after ~a week of no queries — and
+// /api/me returns without touching the database when nobody is signed in.
+app.get("/api/health", wrap(async (req, res) => {
+  const t0 = Date.now();
+  await db.query("SELECT 1");
+  res.json({ ok: true, db: "up", ms: Date.now() - t0 });
+}));
+
 // ── auth routes ──────────────────────────────────────────
 app.post("/api/login", wrap(async (req, res) => {
   const { email, password } = req.body || {};
