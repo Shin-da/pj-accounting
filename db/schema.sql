@@ -82,20 +82,25 @@ CREATE TABLE IF NOT EXISTS records (
     commission_value  NUMERIC(16,2)  DEFAULT 0,
     sheet             TEXT
 );
+-- Columns added after the first release, applied so an existing database is
+-- upgraded in place when the app starts.
+--
+-- ORDER MATTERS: these must run BEFORE any index that references them. On a
+-- fresh database CREATE TABLE above already includes the columns, but on an
+-- existing one the table is left alone — so indexing `source` before adding it
+-- fails with: column "source" does not exist.
+ALTER TABLE records ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'import';
+ALTER TABLE records ALTER COLUMN dataset_id DROP NOT NULL;
+ALTER TABLE records ADD COLUMN IF NOT EXISTS created_by TEXT;
+ALTER TABLE records ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_records_dataset  ON records(dataset_id);
 CREATE INDEX IF NOT EXISTS idx_records_partner  ON records(partner_slug);
 CREATE INDEX IF NOT EXISTS idx_records_date     ON records(txn_date);
 CREATE INDEX IF NOT EXISTS idx_records_invoice  ON records(invoice);
 CREATE INDEX IF NOT EXISTS idx_records_client   ON records(client);
 CREATE INDEX IF NOT EXISTS idx_records_source   ON records(partner_slug, source);
-
--- Columns added after the first release: applied here so an existing database
--- is upgraded in place when the app starts.
-ALTER TABLE records ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'import';
-ALTER TABLE records ALTER COLUMN dataset_id DROP NOT NULL;
-ALTER TABLE records ADD COLUMN IF NOT EXISTS created_by TEXT;
-ALTER TABLE records ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
-ALTER TABLE records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 
 -- ── audit trail ──────────────────────────────────────────────────────
 -- Every write that a person makes, so "who changed this and when" always
