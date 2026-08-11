@@ -51,7 +51,7 @@ const PIE = ["#4f46e5","#0d9488","#d97706","#16a34a","#dc2626","#7c3aed","#0891b
 
 // ── theme ────────────────────────────────────────────────
 function applyTheme(t) { document.documentElement.dataset.theme = t; try { localStorage.setItem("rdr-theme", t); } catch(_){} if (CURRENT) renderCharts(); }
-$("#themeToggle").addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+$("#themeToggle")?.addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
 try { applyTheme(localStorage.getItem("rdr-theme") || "light"); } catch(_){}
 
 // ── boot / session ───────────────────────────────────────
@@ -129,22 +129,22 @@ $$(".nav-item").forEach(b => b.addEventListener("click", () => {
 }));
 
 // ── period + filters ─────────────────────────────────────
-$("#periodSeg").addEventListener("click", (e) => {
+$("#periodSeg")?.addEventListener("click", (e) => {
   const b = e.target.closest(".seg-btn"); if (!b) return;
   $$(".seg-btn").forEach(x => x.classList.remove("active")); b.classList.add("active");
   period = b.dataset.p; $("#customRange").hidden = period !== "custom";
   if (period !== "custom") refreshAll();
 });
-$("#from").addEventListener("change", refreshAll);
-$("#to").addEventListener("change", refreshAll);
+$("#from")?.addEventListener("change", refreshAll);
+$("#to")?.addEventListener("change", refreshAll);
 let fqTimer;
-$("#fq").addEventListener("input", () => {
+$("#fq")?.addEventListener("input", () => {
   clearTimeout(fqTimer);
   fqTimer = setTimeout(() => { filters.q = $("#fq").value.trim(); refreshAll(); }, 250);
 });
-$("#fCommType").addEventListener("change", () => { filters.commType = $("#fCommType").value; refreshAll(); });
-$("#fClient").addEventListener("change", () => { filters.client = $("#fClient").value; refreshAll(); });
-$("#fClear").addEventListener("click", () => {
+$("#fCommType")?.addEventListener("change", () => { filters.commType = $("#fCommType").value; refreshAll(); });
+$("#fClient")?.addEventListener("change", () => { filters.client = $("#fClient").value; refreshAll(); });
+$("#fClear")?.addEventListener("click", () => {
   filters = { q: "", commType: "", client: "" };
   $("#fq").value = ""; $("#fCommType").value = ""; $("#fClient").value = "";
   refreshAll();
@@ -469,7 +469,7 @@ async function uploadLogo(slug) {
   renderBrandMark(); loadPartners();
 }
 
-$("#addPartner").addEventListener("click", async () => {
+$("#addPartner")?.addEventListener("click", async () => {
   const name = $("#newPartnerName").value.trim(); if (!name) return;
   await fetch("/api/partners", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ name }) });
   $("#newPartnerName").value = ""; const me = await (await fetch("/api/me")).json(); ME.partners = me.partners;
@@ -493,8 +493,8 @@ async function resetPw(id) {
   alert("Password reset. Share it with the user; they'll be asked to change it."); loadUsers();
 }
 async function toggleUser(id, disabled) { await fetch("/api/users/"+id, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ disabled }) }); loadUsers(); }
-$("#nuRole").addEventListener("change", () => { $("#nuPartner").style.display = $("#nuRole").value === "partner" ? "" : "none"; });
-$("#addUser").addEventListener("click", async () => {
+$("#nuRole")?.addEventListener("change", () => { $("#nuPartner").style.display = $("#nuRole").value === "partner" ? "" : "none"; });
+$("#addUser")?.addEventListener("click", async () => {
   const body = { name: $("#nuName").value.trim(), email: $("#nuEmail").value.trim(), role: $("#nuRole").value,
     partner: $("#nuPartner").value, password: $("#nuPass").value };
   const r = await (await fetch("/api/users", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) })).json();
@@ -515,9 +515,9 @@ async function openUpload() {
   updateUploadCurrent();
 }
 function closeModals() { $("#ovl").classList.remove("open"); $("#modal").classList.remove("open"); $("#pwModal").classList.remove("open"); $("#invModal").classList.remove("open"); }
-$("#uploadBtn").addEventListener("click", openUpload);
-$("#uploadPartner").addEventListener("change", updateUploadCurrent);
-$("#doUpload").addEventListener("click", async () => {
+$("#uploadBtn")?.addEventListener("click", openUpload);
+$("#uploadPartner")?.addEventListener("change", updateUploadCurrent);
+$("#doUpload")?.addEventListener("click", async () => {
   const f = $("#fileInput").files[0]; if (!f) { $("#uploadMsg").textContent = "Choose a file first."; return; }
   const fd = new FormData(); fd.append("file", f); fd.append("partner", $("#uploadPartner").value);
   $("#uploadMsg").textContent = "Uploading…";
@@ -530,12 +530,12 @@ $("#doUpload").addEventListener("click", async () => {
   else $("#uploadMsg").textContent = "Failed: " + (r.error || "unknown");
 });
 
-$("#userBtn").addEventListener("click", (e) => { e.stopPropagation(); $("#userMenu").hidden = !$("#userMenu").hidden; });
+$("#userBtn")?.addEventListener("click", (e) => { e.stopPropagation(); $("#userMenu").hidden = !$("#userMenu").hidden; });
 document.addEventListener("click", () => { $("#userMenu").hidden = true; });
-$("#userMenu").addEventListener("click", (e) => e.stopPropagation());
-$("#miLogout").addEventListener("click", async () => { await fetch("/api/logout", { method:"POST" }); window.location = "/login.html"; });
-$("#miChangePw").addEventListener("click", () => { $("#userMenu").hidden = true; $("#ovl").classList.add("open"); $("#pwModal").classList.add("open"); $("#pwMsg").textContent=""; });
-$("#doChangePw").addEventListener("click", async () => {
+$("#userMenu")?.addEventListener("click", (e) => e.stopPropagation());
+$("#miLogout")?.addEventListener("click", async () => { await fetch("/api/logout", { method:"POST" }); window.location = "/login.html"; });
+$("#miChangePw")?.addEventListener("click", () => { $("#userMenu").hidden = true; $("#ovl").classList.add("open"); $("#pwModal").classList.add("open"); $("#pwMsg").textContent=""; });
+$("#doChangePw")?.addEventListener("click", async () => {
   const r = await (await fetch("/api/change-password", { method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({ current: $("#pwCurrent").value, next: $("#pwNext").value }) })).json();
   if (r.ok) { $("#pwMsg").style.color = "var(--success)"; $("#pwMsg").textContent = "Password updated."; setTimeout(closeModals, 800); }
@@ -653,10 +653,10 @@ function openInvoiceEditor(existing) {
   $("#ovl").classList.add("open"); $("#invModal").classList.add("open");
 }
 
-$("#btnAddLine").addEventListener("click", () => { lineItems.push(blankLine()); renderLines(); });
-$("#btnNewInvoice").addEventListener("click", () => openInvoiceEditor(null));
+$("#btnAddLine")?.addEventListener("click", () => { lineItems.push(blankLine()); renderLines(); });
+$("#btnNewInvoice")?.addEventListener("click", () => openInvoiceEditor(null));
 
-$("#btnSaveInvoice").addEventListener("click", async () => {
+$("#btnSaveInvoice")?.addEventListener("click", async () => {
   const payload = {
     partner: partnerSlug,
     invoice: $("#fInvoice").value.trim(),
@@ -685,7 +685,7 @@ $("#btnSaveInvoice").addEventListener("click", async () => {
   }
 });
 
-$("#btnDeleteInvoice").addEventListener("click", async () => {
+$("#btnDeleteInvoice")?.addEventListener("click", async () => {
   if (!editingInvoiceNo) return;
   if (!confirm(`Delete invoice ${editingInvoiceNo}? This cannot be undone.`)) return;
   const qs = new URLSearchParams({ partner: partnerSlug, invoice: editingInvoiceNo });
