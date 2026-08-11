@@ -664,12 +664,17 @@ async function loadUsers() {
     const isSelf = ME && ME.user && ME.user.id === u.id;
     const locked = u.superadmin || (privileged && !canPriv);
     const acts = [];
+    const iAmSuper = !!(ME && ME.user && ME.user.superadmin);
     if (!locked) acts.push(`<button class="btn btn-ghost btn-sm" onclick="resetPw('${u.id}')">Reset pw</button>`);
     if (!locked && !isSelf) {
       acts.push(`<button class="btn btn-ghost btn-sm" onclick="toggleUser('${u.id}',${u.disabled?false:true})">${u.disabled?"Enable":"Disable"}</button>`);
       acts.push(u.archivedAt
         ? `<button class="btn btn-ghost btn-sm" onclick="archiveUser('${u.id}',false)">Restore</button>`
         : `<button class="btn btn-ghost btn-sm btn-danger-ghost" onclick="archiveUser('${u.id}',true)">Archive</button>`);
+    }
+    // Hard delete is superadmin-only; archiving is the normal route.
+    if (iAmSuper && !u.superadmin && !isSelf) {
+      acts.push(`<button class="btn btn-ghost btn-sm btn-danger-ghost" onclick="deleteUser('${u.id}')">Delete</button>`);
     }
     if (!acts.length) acts.push(`<span class="page-sub">${u.superadmin ? "protected" : isSelf ? "you" : "read-only"}</span>`);
 
@@ -702,6 +707,38 @@ async function loadUsers() {
   if (hint) hint.textContent = canPriv
     ? "You are the superadmin: you can manage every account."
     : "You can manage partner accounts. Admin and owner accounts are superadmin-only.";
+}
+
+/* Permanent deletion. Archiving is the normal way to remove an account, so
+   this asks twice: once showing what the account has touched, and once for
+   the email typed exactly — which is also what the API requires. */
+async function deleteUser(id) {
+  const info = await (await fetch(`/api/users/${id}/activity`)).json();
+  if (!info.ok) { alert(info.error || "Could not read that account."); return; }
+  const a = info.activity;
+
+  const history = a.total
+    ? `\n\nThis account is on ${a.total} existing record${a.total === 1 ? "" : "s"}:` +
+      `\n  · ${a.audits} audit entr${a.audits === 1 ? "y" : "ies"}` +
+      `\n  · ${a.records} invoice line${a.records === 1 ? "" : "s"}` +
+      `\n  · ${a.payments} payment${a.payments === 1 ? "" : "s"}` +
+      `\n\nThose entries will keep their email but no longer match an account.` +
+      `\nArchiving instead would keep the link intact.`
+    : "\n\nThis account has no history, so nothing else is affected.";
+
+  const typed = prompt(
+    `Permanently delete ${info.email}?${history}\n\nThis cannot be undone. ` +
+    `Type the email address to confirm:`);
+  if (typed == null) return;
+  if (typed.trim().toLowerCase() !== String(info.email).toLowerCase()) {
+    alert("That didn't match — nothing was deleted.");
+    return;
+  }
+
+  const r = await (await fetch(`/api/users/${id}?confirm=${encodeURIComponent(info.email)}`,
+    { method: "DELETE" })).json();
+  if (!r.ok) { alert(r.error || "Could not delete."); return; }
+  loadUsers();
 }
 
 async function archiveUser(id, archived) {

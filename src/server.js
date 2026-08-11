@@ -557,10 +557,50 @@ app.patch("/api/users/:id", auth.requireRole("admin"), wrap(async (req, res) => 
   } catch (e) { res.status(400).json({ error: e.message }); }
 }));
 
-/* Deliberately no DELETE route. Removing a user is an archive, never a row
-   deletion: audit_log.actor and records.created_by hold an email as free
-   text, so a hard delete would leave the trail naming somebody the system no
-   longer knows. In an accounting system that answer has to survive. */
+/* How much history an account has left behind. The UI shows this in the
+   delete confirmation so nobody removes an account blind. */
+app.get("/api/users/:id/activity", auth.requireSuperadmin, wrap(async (req, res) => {
+  const u = auth.publicUser(await auth.findById(req.params.id));
+  if (!u) return res.status(404).json({ error: "user not found" });
+  res.json({ ok: true, email: u.email, activity: await auth.activityFor(u.email) });
+}));
+
+/* Hard delete — superadmin only.
+ *
+ * Archiving is the normal way to remove somebody, and it is what the audit
+ * trail wants: `audit_log.actor` and `records.created_by` store an email as
+ * free text, so deleting the row leaves those entries naming a person the
+ * system no longer knows. This exists for the cases where that doesn't
+ * matter — a typo'd address, a duplicate, a test account.
+ *
+ * Two safeguards: the caller must pass the exact email as `?confirm=`, so a
+ * mis-aimed request cannot delete the wrong person; and the audit entry is
+ * written BEFORE the row goes, recording who this was and what they had
+ * touched, so the trail still explains the gap afterwards.
+ */
+app.delete("/api/users/:id", auth.requireSuperadmin, wrap(async (req, res) => {
+  const target = auth.publicUser(await auth.findById(req.params.id));
+  if (!target) return res.status(404).json({ error: "user not found" });
+
+  const denied = auth.canDelete(req.user, target);
+  if (denied) return res.status(403).json({ error: denied });
+
+  const confirm = String(req.query.confirm || "").trim().toLowerCase();
+  if (confirm !== String(target.email).toLowerCase()) {
+    return res.status(400).json({
+      error: "confirmation required: pass ?confirm=<the account's exact email>",
+    });
+  }
+
+  const activity = await auth.activityFor(target.email);
+  await logUserChange(req.user, "user.delete", target, {
+    name: target.name, role: target.role, partner: target.partner,
+    archivedAt: target.archivedAt, activityAtDeletion: activity,
+    note: "row permanently removed; this entry is the remaining record of the account",
+  });
+  await auth.deleteUser(target.id);
+  res.json({ ok: true, deleted: target.email, activity });
+}));
 
 // ── error handler (must be last) ─────────────────────────
 app.use((err, req, res, next) => {

@@ -149,6 +149,42 @@ function canLockOut(actor, target, patch) {
   return null;
 }
 
+/* Hard delete is superadmin-only and deliberately awkward.
+ * Archiving is the normal way to remove someone; this exists for genuine
+ * mistakes — a typo'd account, a duplicate, a test user. The row goes for
+ * good, so the caller must also pass the exact email as confirmation. */
+function canDelete(actor, target) {
+  if (!actor) return "not signed in";
+  if (!actor.superadmin) return "only the superadmin can delete an account";
+  if (isSuperadmin(target)) return "the superadmin account cannot be deleted";
+  if (actor.id === target.id) return "you cannot delete your own account";
+  return null;
+}
+
+/** How much history an account has left behind, so a delete can be informed. */
+async function activityFor(email) {
+  const e = String(email || "").toLowerCase();
+  const q = async (sql) => {
+    const r = await db.one(sql, [e]);
+    return r ? Number(r.n) : 0;
+  };
+  const [audits, records, pays] = await Promise.all([
+    q("SELECT COUNT(*)::int AS n FROM audit_log WHERE lower(actor) = $1"),
+    q("SELECT COUNT(*)::int AS n FROM records   WHERE lower(created_by) = $1"),
+    q("SELECT COUNT(*)::int AS n FROM payments  WHERE lower(created_by) = $1"),
+  ]);
+  return { audits, records, payments: pays, total: audits + records + pays };
+}
+
+/** Remove the row entirely. The audit entry is written by the caller FIRST,
+ *  so the trail still explains who this person was after they are gone. */
+async function deleteUser(id) {
+  const u = await findById(id);
+  if (!u) throw new Error("user not found");
+  await db.query("DELETE FROM users WHERE id = $1", [id]);
+  return publicUser(u);
+}
+
 /** Role a user is allowed to hand out. */
 function canAssignRole(actor, role) {
   if (PRIVILEGED.has(role) && !actor.superadmin) {
@@ -315,5 +351,6 @@ module.exports = {
   ROLES, initSecret, attachUser, requireAuth, requireRole, requireSuperadmin,
   setSession, clearSession, authenticate, publicUser, createUser, updateUser,
   setOwnPassword, listUsers, findById, findByEmail, seedIfEmpty,
-  isSuperadmin, canManage, canLockOut, canAssignRole, SUPERADMIN_EMAIL,
+  isSuperadmin, canManage, canLockOut, canAssignRole, canDelete,
+  deleteUser, activityFor, SUPERADMIN_EMAIL,
 };

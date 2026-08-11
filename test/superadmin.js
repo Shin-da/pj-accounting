@@ -85,9 +85,11 @@ const t = (n,c,x)=>{ if(!c) ok=false; console.log((c?'PASS ':'FAIL ')+n+(x!==und
   t('superadmin CAN archive an admin', (await patch(sc, admin.id, {archived:true})).status === 200);
   t('superadmin still cannot archive themselves', (await patch(sc, su.id, {archived:true})).status === 403);
 
-  // ── there is no hard-delete route at all ──
-  t('DELETE /api/users is not a route',
-    [404,405].includes((await fetch(base+'/api/users/'+part.id,{method:'DELETE',headers:{cookie:sc}})).status));
+  // ── hard delete exists but is superadmin-only and needs confirmation ──
+  // (the full behaviour is exercised further down; this is the first gate)
+  t('delete is refused without the confirmation parameter',
+    (await fetch(base+'/api/users/'+part.id,{method:'DELETE',headers:{cookie:sc}})).status === 400);
+  t('the account is untouched by an unconfirmed delete', !!(await auth.findById(part.id)));
 
   // ── the audit trail recorded who did what ──
   const log = await db.query("SELECT action, actor, entity FROM audit_log WHERE action LIKE 'user.%' ORDER BY id");
@@ -99,6 +101,48 @@ const t = (n,c,x)=>{ if(!c) ok=false; console.log((c?'PASS ':'FAIL ')+n+(x!==und
     actions.join(', '));
   t('refused attempts left no audit entry', log.length === 5, log.length + ' entries');
   t('the archive names who did it', log.some(r => r.action === 'user.archive' && r.actor === 'alvin@x.com'));
+
+
+  // ── hard delete: superadmin only, and hard to do by accident ──
+  const del = (c, id, confirm) => fetch(base + '/api/users/' + id +
+    (confirm !== undefined ? '?confirm=' + encodeURIComponent(confirm) : ''),
+    { method: 'DELETE', headers: { cookie: c } });
+
+  const victim = await auth.createUser({ name:'Typo', email:'tyop@x.com', role:'partner', partner:'rdr', password:'secret123' });
+
+  // `admin` was archived above, so its session is dead and would return 401.
+  // Use a fresh, ACTIVE admin so this really tests the role gate.
+  await auth.createUser({ name:'Live', email:'live@x.com', role:'admin', password:'secret123' });
+  const lc = await login('live@x.com');
+  t('the fresh admin is signed in and active', !!lc && (await get(lc,'/api/me')).user.role === 'admin');
+
+  t('an active admin CANNOT delete anyone', (await del(lc, victim.id, 'tyop@x.com')).status === 403);
+  t('superadmin CANNOT delete themselves', (await del(sc, su.id, 'shin@perfectjewel.com')).status === 403);
+  t('delete without confirmation is refused', (await del(sc, victim.id)).status === 400);
+  t('delete with the WRONG email is refused', (await del(sc, victim.id, 'someone@else.com')).status === 400);
+  t('the account survived every refused attempt', !!(await auth.findById(victim.id)));
+
+  t('superadmin CAN delete with the exact email', (await del(sc, victim.id, 'tyop@x.com')).status === 200);
+  t('the row is really gone', (await auth.findById(victim.id)) === null);
+  t('deleted user cannot sign in', (await login('tyop@x.com')) === null);
+
+  const delLog = await db.query("SELECT actor, entity, details FROM audit_log WHERE action = 'user.delete'");
+  t('the deletion is audit-logged', delLog.length === 1, delLog.length + ' entries');
+  t('the log still names who was deleted and by whom',
+    delLog[0] && delLog[0].entity === 'tyop@x.com' && delLog[0].actor === 'shin@perfectjewel.com',
+    delLog[0] ? delLog[0].actor + ' deleted ' + delLog[0].entity : '');
+  t('the log records what they had touched',
+    delLog[0] && JSON.parse(typeof delLog[0].details === 'string' ? delLog[0].details : JSON.stringify(delLog[0].details)).activityAtDeletion !== undefined);
+
+  // an account WITH history: the activity endpoint must report it
+  const act = await get(sc, '/api/users/' + admin.id + '/activity');
+  t('activity endpoint reports history before deleting',
+    act.ok && act.activity && typeof act.activity.total === 'number',
+    act.activity ? act.activity.total + ' records' : 'missing');
+  t('an active admin CANNOT read the activity endpoint',
+    (await fetch(base + '/api/users/' + admin.id + '/activity', { headers:{cookie:lc} })).status === 403);
+  t('an archived admin\'s session is dead entirely',
+    (await del(ac, victim.id, 'tyop@x.com')).status === 401);
 
   srv.close();
   console.log(ok ? '\nSUPERADMIN RULES HOLD' : '\nPROBLEMS FOUND');
