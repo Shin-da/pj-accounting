@@ -20,11 +20,20 @@ const ALLOWED_PROOF = { "image/jpeg": 1, "image/png": 1, "image/webp": 1,
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
-/** Total commission the partner has earned, across every record we hold. */
+/**
+ * Total commission the partner has earned.
+ *
+ * IMPORTANT: only the CURRENT dataset plus manual invoices — the same set the
+ * sales register shows. Superseded uploads are still in `records` (that's the
+ * version history), so summing the whole table double-counts every re-upload.
+ */
 async function totalEarned(partnerSlug) {
   const row = await db.one(
-    `SELECT COALESCE(SUM(commission_value), 0) AS earned
-     FROM records WHERE partner_slug = $1`, [partnerSlug]);
+    `SELECT COALESCE(SUM(r.commission_value), 0) AS earned
+     FROM records r
+     LEFT JOIN datasets d ON d.id = r.dataset_id
+     WHERE r.partner_slug = $1
+       AND (r.source = 'manual' OR d.is_current = TRUE)`, [partnerSlug]);
   return round2(row ? row.earned : 0);
 }
 
