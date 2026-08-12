@@ -11,6 +11,11 @@
 
 module.exports = {
   PORT: Number(process.env.PORT) || 5055,
+  // Maintenance mode cuts off app access and shows the maintenance page.
+  MAINTENANCE_MODE: String(process.env.MAINTENANCE_MODE || "false").toLowerCase() === "true" ||
+    String(process.env.MAINTENANCE_MODE || "false").toLowerCase() === "1" ||
+    String(process.env.MAINTENANCE_MODE || "false").toLowerCase() === "yes",
+  MAINTENANCE_MESSAGE: process.env.MAINTENANCE_MESSAGE || "The system is temporarily under maintenance.",
   // How long a login lasts. The signing secret lives in the settings table
   // (or the AUTH_SECRET env var) — see src/auth.js.
   SESSION_TTL_MS: 1000 * 60 * 60 * 24 * 14,              // 14 days

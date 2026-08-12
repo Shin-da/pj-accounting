@@ -17,7 +17,7 @@ const path = require("path");
 const express = require("express");
 const multer = require("multer");
 
-const { PORT, CURRENCY } = require("../config");
+const { PORT, CURRENCY, MAINTENANCE_MODE, MAINTENANCE_MESSAGE } = require("../config");
 const { parseWorkbookBuffer, aggregate, groupInvoices } = require("./parse");
 const db = require("./db");
 const auth = require("./auth");
@@ -36,6 +36,16 @@ const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: false }));
 app.use(auth.attachUser);
+app.use((req, res, next) => {
+  if (!MAINTENANCE_MODE) return next();
+  const p = String(req.path || "").toLowerCase();
+  if (p === "/api/health") return next();
+  if (p.startsWith("/api/")) {
+    return res.status(503).json({ ok: false, maintenance: true, message: MAINTENANCE_MESSAGE });
+  }
+  if (p === "/maintenance.html" || p === "/style.css" || p.startsWith("/logos/")) return next();
+  return res.sendFile(path.join(__dirname, "..", "public", "maintenance.html"));
+});
 app.use(express.static(path.join(__dirname, "..", "public"), {
   etag: false, lastModified: false,
   setHeaders: (res) => res.setHeader("Cache-Control", "no-store"),
