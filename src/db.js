@@ -63,10 +63,55 @@ async function tx(fn) {
   }
 }
 
+/* Translate a raw pg/network error into something a person can act on. Node's
+ * connection errors are real Error objects with a real .message — but a few
+ * common causes (Postgres not running, wrong password, database missing) all
+ * produce cryptic codes that don't say what to actually go check. This turns
+ * "ECONNREFUSED" into "Postgres isn't reachable — is it running?" */
+function friendlyConnectionError(err) {
+  const code = err && err.code;
+  const host = (() => { try { return new URL(CONNECTION_STRING.trim()).hostname; } catch (_) { return "the host"; } })();
+  const port = (() => { try { return new URL(CONNECTION_STRING.trim()).port || "5432"; } catch (_) { return "5432"; } })();
+
+  if (code === "ECONNREFUSED") {
+    return `Could not reach Postgres at ${host}:${port} — connection refused.\n` +
+           `     Is Postgres installed and running? On Windows: Services (services.msc) → ` +
+           `look for 'postgresql-x64-...' and make sure it's Started.`;
+  }
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    return `Could not resolve host '${host}'. Check DATABASE_URL for a typo.`;
+  }
+  if (code === "ETIMEDOUT") {
+    return `Connection to ${host}:${port} timed out. If this is Supabase's DIRECT connection ` +
+           `it is IPv6-only and often unreachable — use the Session pooler string instead.`;
+  }
+  if (code === "28P01") {
+    return `Postgres rejected the password for this user. Check the password in DATABASE_URL ` +
+           `— if it was reset, the string here is now stale.`;
+  }
+  if (code === "3D000") {
+    return `The database in DATABASE_URL does not exist yet. Create it first, ` +
+           `e.g.  CREATE DATABASE ${(() => { try { return new URL(CONNECTION_STRING.trim()).pathname.slice(1); } catch (_) { return "pj_dev"; } })()};`;
+  }
+  if (code === "28000") {
+    return `Postgres rejected this user/role entirely (not just the password). Check the username in DATABASE_URL.`;
+  }
+  // Fall through to whatever pg gave us, but never hand back nothing —
+  // an error with a blank message is worse than no error handling at all.
+  return (err && err.message) || (err && err.code) || String(err) || "unknown connection error";
+}
+
 /** Apply db/schema.sql. Safe to run on every startup. */
 async function init() {
   const sql = fs.readFileSync(path.join(__dirname, "..", "db", "schema.sql"), "utf8");
-  await pool.query(sql);
+  try {
+    await pool.query(sql);
+  } catch (err) {
+    const friendly = friendlyConnectionError(err);
+    const wrapped = new Error(friendly);
+    wrapped.cause = err;
+    throw wrapped;
+  }
 }
 
 /** Simple key/value settings (used for the session secret). */
@@ -150,4 +195,4 @@ function assertUsableConnectionString() {
 }
 
 module.exports = { pool, query, one, tx, init, getSetting, setSetting,
-                   checkConnectionString, assertUsableConnectionString };
+                   checkConnectionString, assertUsableConnectionString, friendlyConnectionError };

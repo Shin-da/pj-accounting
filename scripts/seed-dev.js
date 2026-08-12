@@ -114,7 +114,17 @@ async function main() {
   const summary = await payments.summary("rdr");
   console.log(`\nDone. Payouts: earned ${summary.earned}, paid ${summary.paid}, balance ${summary.balance}.`);
   console.log(`Log in at http://localhost:5055 as ${superEmail} / dev-super-1\n`);
-  process.exit(0);
+  await db.pool.end();
 }
 
-main().catch((e) => { console.error("\n ! seed failed:", e.message); process.exit(1); });
+main().catch(async (e) => {
+  // Never print a blank error — fall back through message -> code -> the
+  // object itself, so this can't silently swallow the one thing you need.
+  const msg = (e && e.message) || (e && e.code) || String(e) || "unknown error";
+  console.error("\n ! seed failed:", msg);
+  // No process.exit() right after this write: on Windows, under `npm run`,
+  // stdout is piped and an immediate exit can truncate a fresh multi-line
+  // write before it flushes — which looks exactly like a blank error message.
+  process.exitCode = 1;
+  await db.pool.end().catch(() => {});
+});

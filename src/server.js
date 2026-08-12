@@ -656,10 +656,19 @@ async function start() {
     const list = (await partners.listPartners()).map((x) => x.slug);
     listenOn(0, list);
   } catch (e) {
+    // A blank error here defeats the whole point of the diagnostics above —
+    // this must always print SOMETHING (message, code, or the object itself).
+    const msg = (e && e.message) || (e && e.code) || String(e) || "unknown error";
     console.error("\n ! Could not start — database problem:");
-    console.error("   " + e.message);
+    console.error("   " + msg);
     console.error("   Check DATABASE_URL is set and the database is reachable.\n");
-    process.exit(1);
+    // Not process.exit() here: on Windows, calling it immediately after a
+    // multi-line console.error can truncate the write before it flushes when
+    // stdout is piped (as it is under `npm start`) — the exact symptom of an
+    // error that prints as a blank line. Setting exitCode and returning lets
+    // Node flush normally, then exit once the (soon-to-be-idle) pool clears.
+    process.exitCode = 1;
+    await db.pool.end().catch(() => {});
   }
 }
 
