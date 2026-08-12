@@ -7,9 +7,10 @@ them only when you want to run the suites:
 ```bash
 npm i --no-save pg-mem jsdom
 
-node test/preflight.js    # role scoping + data leaks   (pg-mem)
-node test/superadmin.js   # account rules + archival    (pg-mem)
-node test/ui-smoke.js     # the page itself             (jsdom)
+node test/preflight.js       # role scoping + data leaks     (pg-mem)
+node test/superadmin.js      # account rules + archival      (pg-mem)
+node test/ui-smoke.js        # the page itself               (jsdom)
+node test/maintenance-ui.js  # maintenance page logic        (jsdom)
 ```
 
 Run all three before any deploy. Each exits non-zero on failure.
