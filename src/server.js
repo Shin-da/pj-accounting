@@ -35,13 +35,32 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 30 
 const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024 } });
 app.use(express.json({ limit: "5mb" }));
 app.use(express.urlencoded({ extended: false }));
+/* ── database readiness ───────────────────────────────────
+ * Defaults to true so requiring this module directly (as the test suites
+ * do — they call db.init() themselves and never call start()) behaves
+ * exactly as before: no test needs to know this flag exists.
+ *
+ * In production, start() flips this to false if the database can't be
+ * reached, which is what puts the site into maintenance mode automatically
+ * — see the note on start() for why this matters.
+ */
+let dbReady = true;
+let dbError = null;
+
 app.use(auth.attachUser);
 app.use((req, res, next) => {
-  if (!MAINTENANCE_MODE) return next();
+  // Maintenance shows for two reasons: someone deliberately turned it on
+  // (MAINTENANCE_MODE), or the database is unreachable (dbReady is false).
+  // Visitors see the same friendly page either way — the real reason is
+  // only in the server log and /api/health, never in the public response.
+  if (!MAINTENANCE_MODE && dbReady) return next();
   const p = String(req.path || "").toLowerCase();
   if (p === "/api/health") return next();
   if (p.startsWith("/api/")) {
-    return res.status(503).json({ ok: false, maintenance: true, message: MAINTENANCE_MESSAGE });
+    return res.status(503).json({
+      ok: false, maintenance: true,
+      message: MAINTENANCE_MODE ? MAINTENANCE_MESSAGE : "The system is reconnecting. Try again shortly.",
+    });
   }
   if (p === "/maintenance.html" || p === "/style.css" || p.startsWith("/logos/")) return next();
   return res.sendFile(path.join(__dirname, "..", "public", "maintenance.html"));
@@ -58,8 +77,20 @@ app.use(express.static(path.join(__dirname, "..", "public"), {
 // /api/me returns without touching the database when nobody is signed in.
 app.get("/api/health", wrap(async (req, res) => {
   const t0 = Date.now();
-  await db.query("SELECT 1");
-  res.json({ ok: true, db: "up", ms: Date.now() - t0 });
+  try {
+    await db.query("SELECT 1");
+    // A live query just succeeded — if we were marked down (e.g. Supabase
+    // had paused and this ping woke it), recognise that immediately instead
+    // of waiting for the background retry timer. The cron job that's meant
+    // to keep the database awake ends up being the same ping that notices
+    // it's back.
+    if (!dbReady) { dbReady = true; dbError = null; console.log(" * database reachable again (via /api/health)"); }
+    res.json({ ok: true, db: "up", ms: Date.now() - t0 });
+  } catch (e) {
+    const reason = db.friendlyConnectionError(e);
+    dbReady = false; dbError = reason;
+    res.status(503).json({ ok: false, db: "down", reason });
+  }
 }));
 
 // ── auth routes ──────────────────────────────────────────
@@ -625,51 +656,73 @@ app.use((err, req, res, next) => {
 // ── startup ──────────────────────────────────────────────
 const CANDIDATE_PORTS = [PORT, 5056, 5065, 5155, 3055, 0];
 
-function listenOn(i, partnerList) {
+function listenOn(i) {
   if (i >= CANDIDATE_PORTS.length) { console.error("\n ! Could not bind any port.\n"); process.exit(1); }
   const p = CANDIDATE_PORTS[i];
   const server = app.listen(p, () => {
     const actual = server.address().port;
     console.log(`\n * Perfect Jewel accounting on http://localhost:${actual}`);
-    console.log(` * partners: ${partnerList.join(", ") || "none"}`);
+    console.log(" * connecting to the database...");
     if (actual !== PORT) console.log(`\n   (port ${PORT} was busy — using ${actual}; open the URL above)`);
   });
   server.on("error", (e) => {
     if (e.code === "EADDRINUSE") {
       console.log(` * port ${p} busy, trying another…`);
-      listenOn(i + 1, partnerList);
+      listenOn(i + 1);
     } else { throw e; }
   });
 }
 
-/** Connect, apply the schema, seed the first accounts, then listen. */
-async function start() {
+/*
+ * Connect to the database, apply the schema, seed the first accounts.
+ *
+ * IMPORTANT — this used to run BEFORE the port was opened. If the database
+ * was unreachable (bad DATABASE_URL, Supabase paused, wrong password), the
+ * process threw and exited without ever binding a port. On Render that looks
+ * like a deploy that never finishes: Render's health check never sees an
+ * open port, assumes the boot is still in progress, and keeps restarting the
+ * container — the endless "Application loading" screen. Maintenance mode
+ * couldn't help either, because the app that would serve the maintenance
+ * page never started.
+ *
+ * Now: the port opens FIRST (see start()), and this function is called
+ * afterwards. If it fails, it flips `dbReady` to false — which puts the site
+ * into maintenance mode automatically — and retries itself with backoff
+ * instead of giving up. A transient problem (Supabase waking up, a brief
+ * network blip) heals on its own with no redeploy; a real misconfiguration
+ * shows the maintenance page instead of Render's spinner or a raw crash,
+ * and the actual reason is always in the log and at /api/health.
+ */
+let retryDelayMs = 5000;
+const MAX_RETRY_DELAY_MS = 60000;
+
+async function connectDb() {
   try {
-    // Check the connection string BEFORE dialling out. A mangled URL otherwise
-    // shows up as a DNS error on a fragment of itself, or hangs long enough
-    // for the host's port scan to time out — neither of which points at the
-    // actual cause, which is nearly always a bad paste.
     db.assertUsableConnectionString();
     await db.init();
     await auth.initSecret();
     await auth.seedIfEmpty("jeffmathewg@gmail.com");
     const list = (await partners.listPartners()).map((x) => x.slug);
-    listenOn(0, list);
+
+    const wasDown = !dbReady;
+    dbReady = true; dbError = null; retryDelayMs = 5000;    // reset backoff for next time
+    console.log(`\n * database ready — partners: ${list.join(", ") || "none"}`);
+    if (wasDown) console.log(" * (was previously unreachable — site is live again)");
   } catch (e) {
-    // A blank error here defeats the whole point of the diagnostics above —
-    // this must always print SOMETHING (message, code, or the object itself).
     const msg = (e && e.message) || (e && e.code) || String(e) || "unknown error";
-    console.error("\n ! Could not start — database problem:");
+    dbReady = false; dbError = msg;
+    console.error("\n ! Database not ready — serving the maintenance page instead of crashing.");
     console.error("   " + msg);
-    console.error("   Check DATABASE_URL is set and the database is reachable.\n");
-    // Not process.exit() here: on Windows, calling it immediately after a
-    // multi-line console.error can truncate the write before it flushes when
-    // stdout is piped (as it is under `npm start`) — the exact symptom of an
-    // error that prints as a blank line. Setting exitCode and returning lets
-    // Node flush normally, then exit once the (soon-to-be-idle) pool clears.
-    process.exitCode = 1;
-    await db.pool.end().catch(() => {});
+    console.error(`   Retrying in ${Math.round(retryDelayMs / 1000)}s...\n`);
+    setTimeout(connectDb, retryDelayMs);
+    retryDelayMs = Math.min(retryDelayMs * 2, MAX_RETRY_DELAY_MS);
   }
+}
+
+/** Open the port immediately, then connect to the database in the background. */
+async function start() {
+  listenOn(0);
+  connectDb();   // deliberately not awaited — the server must be listening either way
 }
 
 if (require.main === module) start();

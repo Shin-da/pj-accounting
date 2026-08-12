@@ -18,7 +18,7 @@
       </div>
     </div>
     <div class="header-right">
-      <span class="company-badge"><span class="company-badge-dot"></span> Maintenance mode</span>
+      <span class="company-badge"><span class="company-badge-dot"></span> <span id="modeLabel">Maintenance mode</span></span>
     </div>
   </header>
 
@@ -33,40 +33,109 @@
       </div>
 
       <div class="maintenance-copy">
-        <div class="eyebrow">System update in progress</div>
-        <h1>We’re tuning the system for a smoother run.</h1>
-        <p>
-          The dashboard is taking a brief maintenance pass to improve performance,
-          verify data integrity, and keep every report accurate for the next sync.
+        <div class="eyebrow" id="eyebrow">Checking status…</div>
+        <h1 id="heading">We're tuning the system for a smoother run.</h1>
+        <p id="bodyText">
+          The dashboard is taking a brief maintenance pass. This page checks automatically
+          and will take you straight to the dashboard the moment it's ready — no need to refresh.
         </p>
 
         <div class="maintenance-status">
-          <span class="status-pill success"><span class="dot"></span> Backups verified</span>
-          <span class="status-pill"><span class="dot"></span> Data checks running</span>
-          <span class="status-pill"><span class="dot"></span> Systems syncing</span>
+          <span class="status-pill" id="pillConnect"><span class="dot"></span> Reaching the server</span>
+          <span class="status-pill" id="pillDb"><span class="dot"></span> Database connection</span>
+          <span class="status-pill" id="pillReady"><span class="dot"></span> Ready to sign in</span>
         </div>
 
         <div class="maintenance-actions">
-          <button class="btn btn-primary" type="button">Notify me when live</button>
-          <button class="btn btn-ghost" type="button">Contact support</button>
+          <button class="btn btn-primary" type="button" id="btnRecheck">Check now</button>
+          <a class="btn btn-ghost" type="button" href="mailto:jeffmathewg@gmail.com?subject=Secret%20Supplier%20is%20down">Contact Shin</a>
         </div>
 
         <div class="info-grid">
           <div class="mini-card">
-            <div class="mini-label">Expected time</div>
-            <div class="mini-value">15–30 mins</div>
+            <div class="mini-label">Last checked</div>
+            <div class="mini-value" id="lastChecked">just now</div>
           </div>
           <div class="mini-card">
             <div class="mini-label">Status</div>
-            <div class="mini-value">Monitoring</div>
+            <div class="mini-value" id="statusValue">Checking…</div>
           </div>
           <div class="mini-card">
-            <div class="mini-label">Focus</div>
-            <div class="mini-value">Reports + sync</div>
+            <div class="mini-label">Auto-retry</div>
+            <div class="mini-value" id="retryValue">every 10s</div>
           </div>
         </div>
       </div>
     </div>
   </main>
+
+  <script>
+    /*
+     * This page is now load-bearing, not decorative: it's what a partner or
+     * Tatay sees if the database is unreachable, not just during a planned
+     * maintenance window. So instead of a fixed "15–30 mins" that's never
+     * true, it polls /api/health and shows what's actually happening —
+     * and jumps straight to the dashboard the moment it's ready.
+     */
+    const $ = (id) => document.getElementById(id);
+    let checking = false;
+
+    function setPill(el, state) {
+      // state: "pending" | "ok" | "bad"
+      el.classList.remove("success", "danger");
+      if (state === "ok") el.classList.add("success");
+      if (state === "bad") el.classList.add("danger");
+    }
+
+    async function check() {
+      if (checking) return;
+      checking = true;
+      $("btnRecheck").disabled = true;
+      setPill($("pillConnect"), "pending");
+
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        setPill($("pillConnect"), "ok");
+
+        let body = null;
+        try { body = await res.json(); } catch (_) { /* fine, handled below */ }
+
+        if (res.ok && body && body.ok) {
+          setPill($("pillDb"), "ok");
+          setPill($("pillReady"), "ok");
+          $("statusValue").textContent = "Back online";
+          $("eyebrow").textContent = "All systems go";
+          $("heading").textContent = "We're back. Taking you in…";
+          $("bodyText").textContent = "The dashboard is ready. Redirecting automatically.";
+          setTimeout(() => { window.location.href = "/"; }, 900);
+        } else {
+          setPill($("pillDb"), "bad");
+          setPill($("pillReady"), "bad");
+          $("statusValue").textContent = "Reconnecting";
+          if (body && body.reason) {
+            // A short, honest status line — not the raw error (which can
+            // include hostnames), just enough to say what's being worked on.
+            $("bodyText").textContent = "Still reconnecting to the database. This page will move on automatically once it's back.";
+          }
+        }
+      } catch (e) {
+        // /api/health itself didn't respond — the app or the network is down,
+        // not just the database.
+        setPill($("pillConnect"), "bad");
+        setPill($("pillDb"), "bad");
+        setPill($("pillReady"), "bad");
+        $("statusValue").textContent = "Unreachable";
+        $("eyebrow").textContent = "Reconnecting…";
+      } finally {
+        $("lastChecked").textContent = "just now";
+        checking = false;
+        $("btnRecheck").disabled = false;
+      }
+    }
+
+    $("btnRecheck").addEventListener("click", check);
+    check();
+    setInterval(check, 10000);
+  </script>
 </body>
 </html>

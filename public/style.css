@@ -383,6 +383,12 @@ body {
   color: var(--success-text);
 }
 
+.status-pill.danger {
+  background: var(--danger-light);
+  border-color: rgba(220, 38, 38, 0.2);
+  color: var(--danger-text);
+}
+
 .status-pill .dot {
   display: inline-block;
   width: 8px;
