@@ -46,6 +46,20 @@ app.use(express.urlencoded({ extended: false }));
  */
 let dbReady = true;
 let dbError = null;
+let downSince = null;   // when the CURRENT outage started, or null if up
+
+/** Both connectDb() and /api/health can detect a transition — funnel state
+ *  changes through here so downSince can't drift out of sync between them. */
+function markDbDown(reason) {
+  if (dbReady) downSince = new Date().toISOString();   // only stamp the FIRST failure of a streak
+  dbReady = false;
+  dbError = reason;
+}
+function markDbUp() {
+  const wasDown = !dbReady;
+  dbReady = true; dbError = null; downSince = null;
+  return wasDown;
+}
 
 app.use(auth.attachUser);
 app.use((req, res, next) => {
@@ -77,6 +91,12 @@ app.use(express.static(path.join(__dirname, "..", "public"), {
 // /api/me returns without touching the database when nobody is signed in.
 app.get("/api/health", wrap(async (req, res) => {
   const t0 = Date.now();
+  // maintenanceMode is reported unconditionally: the maintenance page's
+  // front-end needs to tell "someone deliberately turned this off" apart
+  // from "the database came back", because they call for different UI —
+  // an explicit maintenance window can't be dismissed by a health check
+  // recovering, only by MAINTENANCE_MODE actually being turned off.
+  const base = { maintenanceMode: MAINTENANCE_MODE };
   try {
     await db.query("SELECT 1");
     // A live query just succeeded — if we were marked down (e.g. Supabase
@@ -84,12 +104,11 @@ app.get("/api/health", wrap(async (req, res) => {
     // of waiting for the background retry timer. The cron job that's meant
     // to keep the database awake ends up being the same ping that notices
     // it's back.
-    if (!dbReady) { dbReady = true; dbError = null; console.log(" * database reachable again (via /api/health)"); }
-    res.json({ ok: true, db: "up", ms: Date.now() - t0 });
+    if (markDbUp()) console.log(" * database reachable again (via /api/health)");
+    res.json({ ...base, ok: true, db: "up", ms: Date.now() - t0 });
   } catch (e) {
-    const reason = db.friendlyConnectionError(e);
-    dbReady = false; dbError = reason;
-    res.status(503).json({ ok: false, db: "down", reason });
+    markDbDown(db.friendlyConnectionError(e));
+    res.status(503).json({ ...base, ok: false, db: "down", reason: dbError, downSince });
   }
 }));
 
@@ -704,13 +723,13 @@ async function connectDb() {
     await auth.seedIfEmpty("jeffmathewg@gmail.com");
     const list = (await partners.listPartners()).map((x) => x.slug);
 
-    const wasDown = !dbReady;
-    dbReady = true; dbError = null; retryDelayMs = 5000;    // reset backoff for next time
+    const wasDown = markDbUp();
+    retryDelayMs = 5000;    // reset backoff for next time
     console.log(`\n * database ready — partners: ${list.join(", ") || "none"}`);
     if (wasDown) console.log(" * (was previously unreachable — site is live again)");
   } catch (e) {
     const msg = (e && e.message) || (e && e.code) || String(e) || "unknown error";
-    dbReady = false; dbError = msg;
+    markDbDown(msg);
     console.error("\n ! Database not ready — serving the maintenance page instead of crashing.");
     console.error("   " + msg);
     console.error(`   Retrying in ${Math.round(retryDelayMs / 1000)}s...\n`);

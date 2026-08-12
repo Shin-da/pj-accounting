@@ -18,7 +18,7 @@
       </div>
     </div>
     <div class="header-right">
-      <span class="company-badge"><span class="company-badge-dot"></span> <span id="modeLabel">Maintenance mode</span></span>
+      <span class="company-badge"><span class="company-badge-dot"></span> <span id="modeLabel">Checking status…</span></span>
     </div>
   </header>
 
@@ -34,11 +34,8 @@
 
       <div class="maintenance-copy">
         <div class="eyebrow" id="eyebrow">Checking status…</div>
-        <h1 id="heading">We're tuning the system for a smoother run.</h1>
-        <p id="bodyText">
-          The dashboard is taking a brief maintenance pass. This page checks automatically
-          and will take you straight to the dashboard the moment it's ready — no need to refresh.
-        </p>
+        <h1 id="heading">One moment.</h1>
+        <p id="bodyText">Checking what's going on…</p>
 
         <div class="maintenance-status">
           <span class="status-pill" id="pillConnect"><span class="dot"></span> Reaching the server</span>
@@ -48,21 +45,25 @@
 
         <div class="maintenance-actions">
           <button class="btn btn-primary" type="button" id="btnRecheck">Check now</button>
-          <a class="btn btn-ghost" type="button" href="mailto:jeffmathewg@gmail.com?subject=Secret%20Supplier%20is%20down">Contact Shin</a>
+          <a class="btn btn-ghost" type="button" id="btnContact"
+             href="mailto:jeffmathewg@gmail.com?subject=Secret%20Supplier%20is%20down">Contact Shin</a>
         </div>
 
+        <!-- One honest status grid, driven entirely by what /api/health actually
+             reports — no fixed "15–30 mins" or fake "backups verified" copy.
+             Whoever is staring at this (Tatay, a partner) can see real state. -->
         <div class="info-grid">
           <div class="mini-card">
-            <div class="mini-label">Last checked</div>
-            <div class="mini-value" id="lastChecked">just now</div>
+            <div class="mini-label">Reason</div>
+            <div class="mini-value" id="reasonValue">—</div>
           </div>
           <div class="mini-card">
-            <div class="mini-label">Status</div>
-            <div class="mini-value" id="statusValue">Checking…</div>
+            <div class="mini-label" id="durationLabel">Down for</div>
+            <div class="mini-value" id="durationValue">—</div>
           </div>
           <div class="mini-card">
-            <div class="mini-label">Auto-retry</div>
-            <div class="mini-value" id="retryValue">every 10s</div>
+            <div class="mini-label">Next check</div>
+            <div class="mini-value" id="nextCheckValue">—</div>
           </div>
         </div>
       </div>
@@ -71,20 +72,109 @@
 
   <script>
     /*
-     * This page is now load-bearing, not decorative: it's what a partner or
-     * Tatay sees if the database is unreachable, not just during a planned
-     * maintenance window. So instead of a fixed "15–30 mins" that's never
-     * true, it polls /api/health and shows what's actually happening —
-     * and jumps straight to the dashboard the moment it's ready.
+     * This page is load-bearing, not decorative: it's what a partner or
+     * Tatay sees if the database is unreachable, not only during a planned
+     * maintenance window. So it polls /api/health and shows what's actually
+     * happening, instead of a fixed "15–30 mins" that's never true.
+     *
+     * Two DIFFERENT situations show this same page, and they need DIFFERENT
+     * handling:
+     *
+     *   1. Someone deliberately turned on MAINTENANCE_MODE. Only turning it
+     *      back off (in Render's environment, then a restart) fixes this —
+     *      a healthy database doesn't mean the maintenance window is over.
+     *      Redirecting on a healthy /api/health response here would have
+     *      bounced visitors right back to this same page in a loop, since
+     *      the server still gates everything on MAINTENANCE_MODE.
+     *
+     *   2. The database is unreachable and the server is auto-retrying.
+     *      This one really does self-heal — the moment /api/health reports
+     *      ok:true, the outage is over and it's safe to go back.
+     *
+     * /api/health reports `maintenanceMode` unconditionally so this page can
+     * tell the two apart and behave correctly for each.
      */
     const $ = (id) => document.getElementById(id);
     let checking = false;
+    let nextCheckAt = 0;
+    let tickTimer = null;
 
     function setPill(el, state) {
-      // state: "pending" | "ok" | "bad"
       el.classList.remove("success", "danger");
       if (state === "ok") el.classList.add("success");
       if (state === "bad") el.classList.add("danger");
+    }
+
+    function fmtDuration(ms) {
+      if (ms < 0) ms = 0;
+      const s = Math.floor(ms / 1000);
+      if (s < 60) return s + "s";
+      const m = Math.floor(s / 60), rs = s % 60;
+      if (m < 60) return m + "m " + rs + "s";
+      const h = Math.floor(m / 60), rm = m % 60;
+      return h + "h " + rm + "m";
+    }
+
+    // Ticks the "down for" and "next check" values every second between
+    // polls, so the page feels alive rather than frozen on stale numbers.
+    function tick() {
+      const downSinceMs = window.__downSince;
+      if (downSinceMs) $("durationValue").textContent = fmtDuration(Date.now() - downSinceMs);
+      const remain = Math.max(0, Math.round((nextCheckAt - Date.now()) / 1000));
+      $("nextCheckValue").textContent = checking ? "checking…" : remain + "s";
+    }
+
+    function renderMaintenanceMode() {
+      // Explicit maintenance window. Honest, and no false promise of an
+      // auto-redirect — this needs a person to turn it off.
+      $("modeLabel").textContent = "Scheduled maintenance";
+      setPill($("pillConnect"), "ok");
+      setPill($("pillDb"), "ok");
+      setPill($("pillReady"), "bad");
+      $("eyebrow").textContent = "Scheduled maintenance";
+      $("heading").textContent = "We're making some changes.";
+      $("bodyText").textContent = "The dashboard is intentionally offline for maintenance. This page will move on automatically once it's switched back on.";
+      $("reasonValue").textContent = "Planned maintenance";
+      $("durationLabel").textContent = "In progress for";
+    }
+
+    function renderDbDown(body) {
+      $("modeLabel").textContent = "Reconnecting";
+      setPill($("pillConnect"), "ok");
+      setPill($("pillDb"), "bad");
+      setPill($("pillReady"), "bad");
+      $("eyebrow").textContent = "Reconnecting…";
+      $("heading").textContent = "We're tuning the system for a smoother run.";
+      $("bodyText").textContent = "Still reconnecting to the database. This page checks automatically and will take you straight to the dashboard the moment it's ready.";
+      $("reasonValue").textContent = "Database unreachable";
+      $("durationLabel").textContent = "Down for";
+      if (body && body.downSince) window.__downSince = new Date(body.downSince).getTime();
+    }
+
+    function renderBackOnline() {
+      setPill($("pillConnect"), "ok");
+      setPill($("pillDb"), "ok");
+      setPill($("pillReady"), "ok");
+      $("modeLabel").textContent = "Back online";
+      $("eyebrow").textContent = "All systems go";
+      $("heading").textContent = "We're back. Taking you in…";
+      $("bodyText").textContent = "The dashboard is ready. Redirecting automatically.";
+      $("reasonValue").textContent = "Resolved";
+      setTimeout(() => { window.location.href = "/"; }, 900);
+    }
+
+    function renderUnreachable() {
+      // /api/health itself didn't respond — the app or the network is down,
+      // not just the database. Distinct from "database down" because there's
+      // nothing this page can poll its way out of; it just keeps trying.
+      setPill($("pillConnect"), "bad");
+      setPill($("pillDb"), "bad");
+      setPill($("pillReady"), "bad");
+      $("modeLabel").textContent = "Unreachable";
+      $("eyebrow").textContent = "Reconnecting…";
+      $("heading").textContent = "Having trouble reaching the server.";
+      $("bodyText").textContent = "Retrying automatically.";
+      $("reasonValue").textContent = "No response from server";
     }
 
     async function check() {
@@ -92,50 +182,36 @@
       checking = true;
       $("btnRecheck").disabled = true;
       setPill($("pillConnect"), "pending");
+      tick();
 
       try {
         const res = await fetch("/api/health", { cache: "no-store" });
-        setPill($("pillConnect"), "ok");
-
         let body = null;
-        try { body = await res.json(); } catch (_) { /* fine, handled below */ }
+        try { body = await res.json(); } catch (_) { /* handled below */ }
 
-        if (res.ok && body && body.ok) {
-          setPill($("pillDb"), "ok");
-          setPill($("pillReady"), "ok");
-          $("statusValue").textContent = "Back online";
-          $("eyebrow").textContent = "All systems go";
-          $("heading").textContent = "We're back. Taking you in…";
-          $("bodyText").textContent = "The dashboard is ready. Redirecting automatically.";
-          setTimeout(() => { window.location.href = "/"; }, 900);
+        if (body && body.maintenanceMode) {
+          renderMaintenanceMode();
+        } else if (res.ok && body && body.ok) {
+          renderBackOnline();
+        } else if (body) {
+          renderDbDown(body);
         } else {
-          setPill($("pillDb"), "bad");
-          setPill($("pillReady"), "bad");
-          $("statusValue").textContent = "Reconnecting";
-          if (body && body.reason) {
-            // A short, honest status line — not the raw error (which can
-            // include hostnames), just enough to say what's being worked on.
-            $("bodyText").textContent = "Still reconnecting to the database. This page will move on automatically once it's back.";
-          }
+          renderUnreachable();
         }
       } catch (e) {
-        // /api/health itself didn't respond — the app or the network is down,
-        // not just the database.
-        setPill($("pillConnect"), "bad");
-        setPill($("pillDb"), "bad");
-        setPill($("pillReady"), "bad");
-        $("statusValue").textContent = "Unreachable";
-        $("eyebrow").textContent = "Reconnecting…";
+        renderUnreachable();
       } finally {
-        $("lastChecked").textContent = "just now";
         checking = false;
         $("btnRecheck").disabled = false;
+        nextCheckAt = Date.now() + 10000;
+        tick();
       }
     }
 
     $("btnRecheck").addEventListener("click", check);
     check();
     setInterval(check, 10000);
+    tickTimer = setInterval(tick, 1000);
   </script>
 </body>
 </html>
