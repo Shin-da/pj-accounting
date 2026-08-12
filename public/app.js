@@ -376,11 +376,16 @@ function renderCharts() {
 const SORT = {};        // el -> { key, dir }
 const TABLE_ARGS = {};  // el -> args, so a header click can re-render
 function smartCompare(av, bv) {
+  const a = av ?? "", b = bv ?? "";
+  if (typeof a === "string" && typeof b === "string") {
+    const ad = Date.parse(a), bd = Date.parse(b);
+    if (!Number.isNaN(ad) && !Number.isNaN(bd)) return ad - bd;
+  }
   const an = typeof av === "number", bn = typeof bv === "number";
   if (an || bn) return (av || 0) - (bv || 0);
   const af = parseFloat(av), bf = parseFloat(bv);
   if (!isNaN(af) && !isNaN(bf)) return af - bf;
-  return String(av ?? "").localeCompare(String(bv ?? ""));
+  return String(a).localeCompare(String(b));
 }
 function table(el, cols, rows, cellFn, foot) {
   TABLE_ARGS[el] = { cols, rows, cellFn, foot };

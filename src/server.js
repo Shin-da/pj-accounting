@@ -10,6 +10,9 @@
  *
  * Storage is PostgreSQL (see src/db.js). Every handler is async because of it.
  */
+
+// Load .env first: everything below reads process.env at require time.
+require("./env").loadEnv();
 const path = require("path");
 const express = require("express");
 const multer = require("multer");

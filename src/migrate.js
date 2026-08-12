@@ -16,6 +16,9 @@
  * again if it fails partway. Nothing is deleted from data/ — the files stay as
  * a backup until you're happy.
  */
+
+// Load .env first: everything below reads process.env at require time.
+require("./env").loadEnv();
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
