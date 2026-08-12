@@ -45,8 +45,17 @@ const wait = (ms=30) => new Promise(r => setTimeout(r, ms));
       w.document.getElementById("heading").textContent);
     t('explicit maintenance: labels itself as scheduled, not a database problem',
       w.document.getElementById("reasonValue").textContent === "Planned maintenance");
-    t('explicit maintenance: "ready to sign in" pill is NOT green (nothing to sign into yet)',
-      !w.document.getElementById("pillReady").classList.contains("success"));
+    t('explicit maintenance: "ready to sign in" row is NOT marked ok (nothing to sign into yet)',
+      !w.document.getElementById("pillReady").classList.contains("ok"),
+      w.document.getElementById("pillReady").className);
+    t('explicit maintenance: server + database rows ARE marked ok (only sign-in is blocked)',
+      w.document.getElementById("pillConnect").classList.contains("ok") &&
+      w.document.getElementById("pillDb").classList.contains("ok"));
+    t('explicit maintenance: status icon still shows "checking" (spinner), not a red/green terminal state',
+      w.document.getElementById("maintIcon").classList.contains("checking"),
+      w.document.getElementById("maintIcon").className);
+    t('explicit maintenance: header badge dot reads bad (visible at a glance in the tab/header)',
+      w.document.getElementById("badgeDot").classList.contains("bad"));
   }
 
   // ── scenario 2: database down, auto-detected ──
@@ -62,6 +71,9 @@ const wait = (ms=30) => new Promise(r => setTimeout(r, ms));
       w.document.getElementById("durationValue").textContent);
     t('db-down: does not falsely claim it is back',
       !/back online/i.test(w.document.getElementById("modeLabel").textContent.toLowerCase().replace('reconnecting','')));
+    t('db-down: connect row ok, database row bad — pinpoints WHAT is down',
+      w.document.getElementById("pillConnect").classList.contains("ok") &&
+      w.document.getElementById("pillDb").classList.contains("bad"));
   }
 
   // ── scenario 3: genuine recovery — THIS is the case that should redirect ──
@@ -70,6 +82,12 @@ const wait = (ms=30) => new Promise(r => setTimeout(r, ms));
     await wait();
     t('real recovery: DOES claim back online and schedules a redirect',
       /Taking you in/.test(w.document.getElementById("heading").textContent));
+    t('real recovery: all three checklist rows read ok', ['pillConnect','pillDb','pillReady'].every(
+      id => w.document.getElementById(id).classList.contains("ok")));
+    t('real recovery: status icon shows the resolved (green check) state',
+      w.document.getElementById("maintIcon").classList.contains("ok"));
+    t('real recovery: header badge dot reads ok',
+      w.document.getElementById("badgeDot").classList.contains("ok"));
   }
 
   // ── scenario 4: /api/health itself unreachable (network/app down, not just DB) ──

@@ -197,301 +197,181 @@ body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
-
+/* ─────────────────────────────────────────
+   MAINTENANCE PAGE
+   Deliberately built from the SAME tokens and components as the dashboard
+   (kpi-card, section-heading, page-sub, btn) — flat surfaces, no gradients,
+   no blur, no decorative animation. This page is a real fallback screen a
+   partner or Tatay might land on, not a marketing splash.
+───────────────────────────────────────── */
 .maintenance-body {
   display: flex;
-  align-items: stretch;
-  justify-content: center;
+  flex-direction: column;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 15% 20%, rgba(79, 70, 229, 0.20), transparent 28%),
-    radial-gradient(circle at 85% 80%, rgba(13, 148, 136, 0.16), transparent 30%),
-    linear-gradient(135deg, #f8f7f5 0%, #f2f0ee 42%, #ece9e6 100%);
+  background: var(--bg);
 }
 
 .maintenance-header {
   position: sticky;
   top: 0;
   height: var(--header-h);
-  background: rgba(255,255,255,0.72);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(87, 83, 78, 0.12);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
   z-index: 20;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.03);
 }
 
 .maintenance-main {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: calc(100vh - var(--header-h));
-  padding: 32px 20px 52px;
+  padding: 40px 20px;
 }
 
-.maintenance-panel {
-  width: min(1100px, 100%);
-  display: grid;
-  grid-template-columns: 1.05fr 1.2fr;
-  gap: 28px;
-  background: linear-gradient(180deg, rgba(255,255,255,0.86), rgba(249,247,245,0.82));
-  border: 1px solid rgba(79, 70, 229, 0.10);
-  border-radius: 30px;
-  box-shadow: 0 32px 90px rgba(17, 24, 39, 0.12), inset 0 1px 0 rgba(255,255,255,0.9);
-  padding: 28px;
-  overflow: hidden;
-  position: relative;
+.maint-card {
+  width: min(460px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-md);
+  padding: 32px 28px 28px;
+  text-align: center;
 }
 
-.maintenance-panel::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(79, 70, 229, 0.03), rgba(13, 148, 136, 0.03), rgba(168, 122, 43, 0.04));
-  pointer-events: none;
-}
-
-.maintenance-visual {
-  position: relative;
-  min-height: 430px;
-  display: grid;
-  place-items: center;
-  background: linear-gradient(135deg, rgba(79, 70, 229, 0.08), rgba(255,255,255,0.9), rgba(13, 148, 136, 0.06));
-  border: 1px solid rgba(79, 70, 229, 0.08);
-  border-radius: 24px;
-  overflow: hidden;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), inset 0 -18px 38px rgba(79,70,229,0.04);
-}
-
-.orb {
-  position: absolute;
+/* status icon: a plain bordered circle, matching .empty-icon elsewhere in
+   the app, with a small conic-gradient spinner instead of an emoji gear. */
+.maint-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 18px;
   border-radius: 50%;
-  filter: blur(8px);
-  opacity: 0.8;
+  background: var(--bg);
+  border: 1px solid var(--border2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-
-.orb-one {
-  width: 200px;
-  height: 200px;
-  background: rgba(79, 70, 229, 0.13);
-  top: 38px;
-  left: 52px;
-  box-shadow: inset 0 0 18px rgba(255,255,255,0.5);
-}
-
-.orb-two {
-  width: 250px;
-  height: 250px;
-  background: rgba(13, 148, 136, 0.10);
-  right: 35px;
-  bottom: 34px;
-  box-shadow: inset 0 0 18px rgba(255,255,255,0.4);
-}
-
-.gear {
-  position: absolute;
-  font-size: 118px;
-  color: var(--accent);
-  opacity: 0.96;
-  text-shadow: 0 18px 26px rgba(79, 70, 229, 0.18), 0 0 30px rgba(79, 70, 229, 0.15);
-  animation: spin 14s linear infinite;
-}
-
-.gear-main {
-  transform: scale(1.05);
-}
-
-.gear-small {
-  font-size: 52px;
-  right: 98px;
-  bottom: 90px;
-  color: var(--teal);
-  animation-direction: reverse;
-  animation-duration: 9s;
-}
-
-.pulse-ring {
-  position: absolute;
-  width: 220px;
-  height: 220px;
-  border: 1px solid rgba(79, 70, 229, 0.28);
+.maint-spinner {
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  animation: pulse 3s ease-in-out infinite;
+  border: 2.5px solid var(--border2);
+  border-top-color: var(--accent);
+  animation: maint-spin 0.8s linear infinite;
 }
+.maint-icon.ok {
+  background: var(--success-light);
+  border-color: rgba(22, 163, 74, 0.25);
+}
+.maint-icon.ok .maint-spinner {
+  animation: none;
+  border: none;
+  width: auto;
+  height: auto;
+}
+.maint-icon.ok .maint-spinner::before { content: "✓"; color: var(--success-text); font-size: 22px; font-weight: 700; }
+.maint-icon.bad {
+  background: var(--danger-light);
+  border-color: rgba(220, 38, 38, 0.25);
+}
+.maint-icon.bad .maint-spinner {
+  animation: none;
+  border: none;
+  width: auto;
+  height: auto;
+}
+.maint-icon.bad .maint-spinner::before { content: "!"; color: var(--danger-text); font-size: 20px; font-weight: 700; }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
+@keyframes maint-spin {
   to { transform: rotate(360deg); }
 }
 
-@keyframes pulse {
-  0%, 100% { transform: scale(0.92); opacity: 0.5; }
-  50% { transform: scale(1.08); opacity: 1; }
-}
-
-.maintenance-copy {
-  display: flex;
-  flex-direction: column;
+.maint-card .section-heading {
   justify-content: center;
-  position: relative;
-  z-index: 1;
+  margin-bottom: 8px;
 }
 
-.eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  background: linear-gradient(135deg, rgba(79,70,229,0.09), rgba(255,255,255,0.96));
-  border: 1px solid rgba(79, 70, 229, 0.18);
-  color: var(--accent-text);
-  font-size: 11px;
+.maint-card h1 {
+  font-size: 22px;
   font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  border-radius: 999px;
-  padding: 8px 14px;
-  margin-bottom: 18px;
-  box-shadow: 0 12px 30px rgba(79, 70, 229, 0.08);
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin-bottom: 8px;
+  line-height: 1.25;
 }
 
-.maintenance-copy h1 {
-  font-size: clamp(2.5rem, 4vw, 4.05rem);
-  line-height: 0.98;
-  letter-spacing: -0.06em;
-  font-weight: 800;
-  margin-bottom: 14px;
-  color: #1c1917;
+.maint-body {
+  margin: 0 auto 20px;
+  max-width: 360px;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
-.maintenance-copy p {
-  color: var(--muted);
-  font-size: 1.02rem;
-  max-width: 640px;
+/* checklist: plain rows in a bordered box, same visual weight as the rest of
+   the app's list rows (partner-row, flag-toggles) — not floating pills. */
+.maint-checklist {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface2);
+  padding: 4px 14px;
   margin-bottom: 20px;
+  text-align: left;
 }
-
-.maintenance-status {
+.maint-check {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin: 4px 0 22px;
-}
-
-.status-pill {
-  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 9px 13px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.78);
-  border: 1px solid rgba(87, 83, 78, 0.12);
+  gap: 9px;
+  padding: 9px 0;
+  font-size: 13px;
   color: var(--text-2);
-  font-size: 12px;
-  font-weight: 600;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+  border-bottom: 1px solid var(--border);
 }
-
-.status-pill.success {
-  background: var(--success-light);
-  border-color: rgba(22, 163, 74, 0.2);
-  color: var(--success-text);
-}
-
-.status-pill.danger {
-  background: var(--danger-light);
-  border-color: rgba(220, 38, 38, 0.2);
-  color: var(--danger-text);
-}
-
-.status-pill .dot {
-  display: inline-block;
+.maint-check:last-child { border-bottom: none; }
+.maint-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: currentColor;
-  opacity: 0.85;
+  background: var(--border2);
+  flex-shrink: 0;
+  transition: background 0.15s;
 }
+.maint-check.ok .maint-dot { background: var(--success); box-shadow: 0 0 0 2px var(--success-light); }
+.maint-check.bad .maint-dot { background: var(--danger); box-shadow: 0 0 0 2px var(--danger-light); }
+.maint-check.pending .maint-dot { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
+.maint-check.ok span:last-child { color: var(--text); }
 
 .maintenance-actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 26px;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 22px;
 }
 
-.info-grid {
-  display: grid;
+.maint-kpis {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  margin-bottom: 0;
+  text-align: left;
+}
+.maint-kpi-value {
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: normal;
 }
 
-.mini-card {
-  background: rgba(255,255,255,0.7);
-  border: 1px solid rgba(87, 83, 78, 0.12);
-  border-radius: 16px;
-  padding: 14px 16px;
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.03);
-}
+/* the header dot re-uses the same green/red language as .dot.ok / .dot.err
+   elsewhere in the app, so "system status" reads the same everywhere. */
+.company-badge-dot.ok { background: var(--success); box-shadow: 0 0 0 2px var(--success-light); }
+.company-badge-dot.bad { background: var(--danger); box-shadow: 0 0 0 2px var(--danger-light); }
 
-.mini-label {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-  margin-bottom: 4px;
-}
-
-.mini-value {
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--text);
-}
-
-[data-theme="dark"] .maintenance-header {
-  background: rgba(28,25,23,0.7);
-}
-
-[data-theme="dark"] .maintenance-panel {
-  background: linear-gradient(180deg, rgba(28,25,23,0.88), rgba(28,25,23,0.76));
-  border-color: rgba(129, 140, 248, 0.18);
-}
-
-[data-theme="dark"] .maintenance-visual {
-  background: linear-gradient(135deg, rgba(79,70,229,0.12), rgba(28,25,23,0.9));
-}
-
-[data-theme="dark"] .mini-card,
-[data-theme="dark"] .status-pill {
-  background: var(--surface);
-}
-
-[data-theme="dark"] .mini-card.emphasis {
-  background: linear-gradient(135deg, rgba(79,70,229,0.12), rgba(28,25,23,0.9));
-  border-color: rgba(129, 140, 248, 0.18);
-}
-
-@media (max-width: 820px) {
-  .maintenance-header {
-    padding: 0 14px;
-  }
-
-  .maintenance-panel {
-    grid-template-columns: 1fr;
-    padding: 18px;
-  }
-
-  .maintenance-visual {
-    min-height: 300px;
-  }
-
-  .info-grid {
-    grid-template-columns: 1fr;
-  }
+@media (max-width: 520px) {
+  .maintenance-header { padding: 0 14px; }
+  .maint-card { padding: 26px 18px 22px; }
+  .maint-kpis { grid-template-columns: 1fr; }
 }
 
 /* ─────────────────────────────────────────

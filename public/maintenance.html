@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>System Maintenance — Secret Supplier</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="maintenance-body">
@@ -18,53 +18,45 @@
       </div>
     </div>
     <div class="header-right">
-      <span class="company-badge"><span class="company-badge-dot"></span> <span id="modeLabel">Checking status…</span></span>
+      <span class="company-badge"><span class="company-badge-dot" id="badgeDot"></span> <span id="modeLabel">Checking status…</span></span>
     </div>
   </header>
 
   <main class="maintenance-main">
-    <div class="maintenance-panel">
-      <div class="maintenance-visual" aria-hidden="true">
-        <div class="orb orb-one"></div>
-        <div class="orb orb-two"></div>
-        <div class="gear gear-main">⚙</div>
-        <div class="gear gear-small">⚙</div>
-        <div class="pulse-ring"></div>
+    <div class="maint-card">
+      <div class="maint-icon" id="maintIcon" aria-hidden="true"><span class="maint-spinner"></span></div>
+
+      <div class="section-heading" id="eyebrow">Checking status</div>
+      <h1 id="heading">One moment.</h1>
+      <p class="page-sub maint-body" id="bodyText">Checking what's going on…</p>
+
+      <div class="maint-checklist">
+        <div class="maint-check" id="pillConnect"><span class="maint-dot"></span><span>Reaching the server</span></div>
+        <div class="maint-check" id="pillDb"><span class="maint-dot"></span><span>Database connection</span></div>
+        <div class="maint-check" id="pillReady"><span class="maint-dot"></span><span>Ready to sign in</span></div>
       </div>
 
-      <div class="maintenance-copy">
-        <div class="eyebrow" id="eyebrow">Checking status…</div>
-        <h1 id="heading">One moment.</h1>
-        <p id="bodyText">Checking what's going on…</p>
+      <div class="maintenance-actions">
+        <button class="btn btn-primary btn-sm" type="button" id="btnRecheck">Check now</button>
+        <a class="btn btn-ghost btn-sm" type="button" id="btnContact"
+           href="mailto:jeffmathewg@gmail.com?subject=Secret%20Supplier%20is%20down">Contact Shin</a>
+      </div>
 
-        <div class="maintenance-status">
-          <span class="status-pill" id="pillConnect"><span class="dot"></span> Reaching the server</span>
-          <span class="status-pill" id="pillDb"><span class="dot"></span> Database connection</span>
-          <span class="status-pill" id="pillReady"><span class="dot"></span> Ready to sign in</span>
+      <!-- Same kpi-card the dashboard itself uses — one honest status grid,
+           driven entirely by what /api/health actually reports. No fixed
+           "15–30 mins" or fake "backups verified" copy. -->
+      <div class="kpi-grid maint-kpis">
+        <div class="kpi-card">
+          <div class="kpi-label">Reason</div>
+          <div class="kpi-value maint-kpi-value" id="reasonValue">—</div>
         </div>
-
-        <div class="maintenance-actions">
-          <button class="btn btn-primary" type="button" id="btnRecheck">Check now</button>
-          <a class="btn btn-ghost" type="button" id="btnContact"
-             href="mailto:jeffmathewg@gmail.com?subject=Secret%20Supplier%20is%20down">Contact Shin</a>
+        <div class="kpi-card">
+          <div class="kpi-label" id="durationLabel">Down for</div>
+          <div class="kpi-value maint-kpi-value" id="durationValue">—</div>
         </div>
-
-        <!-- One honest status grid, driven entirely by what /api/health actually
-             reports — no fixed "15–30 mins" or fake "backups verified" copy.
-             Whoever is staring at this (Tatay, a partner) can see real state. -->
-        <div class="info-grid">
-          <div class="mini-card">
-            <div class="mini-label">Reason</div>
-            <div class="mini-value" id="reasonValue">—</div>
-          </div>
-          <div class="mini-card">
-            <div class="mini-label" id="durationLabel">Down for</div>
-            <div class="mini-value" id="durationValue">—</div>
-          </div>
-          <div class="mini-card">
-            <div class="mini-label">Next check</div>
-            <div class="mini-value" id="nextCheckValue">—</div>
-          </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Next check</div>
+          <div class="kpi-value maint-kpi-value" id="nextCheckValue">—</div>
         </div>
       </div>
     </div>
@@ -72,20 +64,12 @@
 
   <script>
     /*
-     * This page is load-bearing, not decorative: it's what a partner or
-     * Tatay sees if the database is unreachable, not only during a planned
-     * maintenance window. So it polls /api/health and shows what's actually
-     * happening, instead of a fixed "15–30 mins" that's never true.
-     *
-     * Two DIFFERENT situations show this same page, and they need DIFFERENT
+     * Two DIFFERENT situations show this page, and they need DIFFERENT
      * handling:
      *
      *   1. Someone deliberately turned on MAINTENANCE_MODE. Only turning it
      *      back off (in Render's environment, then a restart) fixes this —
      *      a healthy database doesn't mean the maintenance window is over.
-     *      Redirecting on a healthy /api/health response here would have
-     *      bounced visitors right back to this same page in a loop, since
-     *      the server still gates everything on MAINTENANCE_MODE.
      *
      *   2. The database is unreachable and the server is auto-retrying.
      *      This one really does self-heal — the moment /api/health reports
@@ -97,12 +81,20 @@
     const $ = (id) => document.getElementById(id);
     let checking = false;
     let nextCheckAt = 0;
-    let tickTimer = null;
 
-    function setPill(el, state) {
-      el.classList.remove("success", "danger");
-      if (state === "ok") el.classList.add("success");
-      if (state === "bad") el.classList.add("danger");
+    function setCheck(el, state) {
+      // state: "pending" | "ok" | "bad"
+      el.classList.remove("ok", "bad", "pending");
+      el.classList.add(state);
+    }
+    function setBadge(state) {
+      $("badgeDot").classList.remove("ok", "bad");
+      if (state === "ok" || state === "bad") $("badgeDot").classList.add(state);
+    }
+    function setIconState(state) {
+      // "checking" keeps the spinner turning; "ok"/"bad" swap it for a still glyph
+      $("maintIcon").classList.remove("ok", "bad", "checking");
+      $("maintIcon").classList.add(state);
     }
 
     function fmtDuration(ms) {
@@ -115,8 +107,6 @@
       return h + "h " + rm + "m";
     }
 
-    // Ticks the "down for" and "next check" values every second between
-    // polls, so the page feels alive rather than frozen on stale numbers.
     function tick() {
       const downSinceMs = window.__downSince;
       if (downSinceMs) $("durationValue").textContent = fmtDuration(Date.now() - downSinceMs);
@@ -125,12 +115,12 @@
     }
 
     function renderMaintenanceMode() {
-      // Explicit maintenance window. Honest, and no false promise of an
-      // auto-redirect — this needs a person to turn it off.
+      setIconState("checking");
+      setBadge("bad");
       $("modeLabel").textContent = "Scheduled maintenance";
-      setPill($("pillConnect"), "ok");
-      setPill($("pillDb"), "ok");
-      setPill($("pillReady"), "bad");
+      setCheck($("pillConnect"), "ok");
+      setCheck($("pillDb"), "ok");
+      setCheck($("pillReady"), "bad");
       $("eyebrow").textContent = "Scheduled maintenance";
       $("heading").textContent = "We're making some changes.";
       $("bodyText").textContent = "The dashboard is intentionally offline for maintenance. This page will move on automatically once it's switched back on.";
@@ -139,11 +129,13 @@
     }
 
     function renderDbDown(body) {
+      setIconState("checking");
+      setBadge("bad");
       $("modeLabel").textContent = "Reconnecting";
-      setPill($("pillConnect"), "ok");
-      setPill($("pillDb"), "bad");
-      setPill($("pillReady"), "bad");
-      $("eyebrow").textContent = "Reconnecting…";
+      setCheck($("pillConnect"), "ok");
+      setCheck($("pillDb"), "bad");
+      setCheck($("pillReady"), "bad");
+      $("eyebrow").textContent = "Reconnecting";
       $("heading").textContent = "We're tuning the system for a smoother run.";
       $("bodyText").textContent = "Still reconnecting to the database. This page checks automatically and will take you straight to the dashboard the moment it's ready.";
       $("reasonValue").textContent = "Database unreachable";
@@ -152,9 +144,11 @@
     }
 
     function renderBackOnline() {
-      setPill($("pillConnect"), "ok");
-      setPill($("pillDb"), "ok");
-      setPill($("pillReady"), "ok");
+      setIconState("ok");
+      setBadge("ok");
+      setCheck($("pillConnect"), "ok");
+      setCheck($("pillDb"), "ok");
+      setCheck($("pillReady"), "ok");
       $("modeLabel").textContent = "Back online";
       $("eyebrow").textContent = "All systems go";
       $("heading").textContent = "We're back. Taking you in…";
@@ -164,14 +158,13 @@
     }
 
     function renderUnreachable() {
-      // /api/health itself didn't respond — the app or the network is down,
-      // not just the database. Distinct from "database down" because there's
-      // nothing this page can poll its way out of; it just keeps trying.
-      setPill($("pillConnect"), "bad");
-      setPill($("pillDb"), "bad");
-      setPill($("pillReady"), "bad");
+      setIconState("bad");
+      setBadge("bad");
+      setCheck($("pillConnect"), "bad");
+      setCheck($("pillDb"), "bad");
+      setCheck($("pillReady"), "bad");
       $("modeLabel").textContent = "Unreachable";
-      $("eyebrow").textContent = "Reconnecting…";
+      $("eyebrow").textContent = "Reconnecting";
       $("heading").textContent = "Having trouble reaching the server.";
       $("bodyText").textContent = "Retrying automatically.";
       $("reasonValue").textContent = "No response from server";
@@ -181,7 +174,8 @@
       if (checking) return;
       checking = true;
       $("btnRecheck").disabled = true;
-      setPill($("pillConnect"), "pending");
+      setCheck($("pillConnect"), "pending");
+      setIconState("checking");
       tick();
 
       try {
@@ -189,15 +183,10 @@
         let body = null;
         try { body = await res.json(); } catch (_) { /* handled below */ }
 
-        if (body && body.maintenanceMode) {
-          renderMaintenanceMode();
-        } else if (res.ok && body && body.ok) {
-          renderBackOnline();
-        } else if (body) {
-          renderDbDown(body);
-        } else {
-          renderUnreachable();
-        }
+        if (body && body.maintenanceMode) renderMaintenanceMode();
+        else if (res.ok && body && body.ok) renderBackOnline();
+        else if (body) renderDbDown(body);
+        else renderUnreachable();
       } catch (e) {
         renderUnreachable();
       } finally {
@@ -211,7 +200,7 @@
     $("btnRecheck").addEventListener("click", check);
     check();
     setInterval(check, 10000);
-    tickTimer = setInterval(tick, 1000);
+    setInterval(tick, 1000);
   </script>
 </body>
 </html>
