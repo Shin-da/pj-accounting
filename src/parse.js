@@ -23,27 +23,125 @@ function num(v) {
   return isNaN(n) ? 0 : n;
 }
 
-function toISO(v) {
-  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+const p2 = (n) => String(n).padStart(2, "0");
+// A calendar date, formatted from LOCAL parts. toISOString() must never be
+// used here: an Excel date is a calendar date, not an instant, and converting
+// it to UTC shifts every row back a day on any machine east of Greenwich
+// (e.g. Asia/Manila, Asia/Shanghai).
+const ymd = (y, m, d) => `${y}-${p2(m)}-${p2(d)}`;
+
+/*
+ * Excel cell -> "YYYY-MM-DD", or null when there is no usable date.
+ *
+ * The date column is NOT always a real date cell. When the column is
+ * formatted as text (or the value was typed with a leading apostrophe) we get
+ * a string like "30/07/2026" — and `new Date("30/07/2026")` is Invalid Date,
+ * because JS reads slash-separated dates as MM/DD/YYYY. That silently nulled
+ * every row past the 12th of the month and mis-read the rest (04/07 -> Apr 7).
+ * So day-first strings are parsed explicitly, matching the sheet's own
+ * "INVOICE DATE (DD/MM/YYYY)" header.
+ */
+function toISO(v, dayFirst = true) {
+  if (v == null || v === "") return null;
+
+  if (v instanceof Date) return isNaN(v) ? null : ymd(v.getFullYear(), v.getMonth() + 1, v.getDate());
+
+  // Excel serial number (sheet read without cellDates, or a stray numeric cell).
   if (typeof v === "number") {
+    if (!isFinite(v) || v <= 0) return null;
     const d = XLSX.SSF ? XLSX.SSF.parse_date_code(v) : null;
-    if (d && d.y) return `${d.y}-${String(d.m).padStart(2,"0")}-${String(d.d).padStart(2,"0")}`;
+    return d && d.y ? ymd(d.y, d.m, d.d) : null;
   }
-  const d = new Date(v);
-  return isNaN(d) ? null : d.toISOString().slice(0, 10);
+
+  const s = String(v).trim();
+  if (!s || s === "-" || /^(n\/?a|none|tbd)$/i.test(s)) return null;
+
+  // ISO-ish: 2026-07-30 / 2026.07.30
+  let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (m) return ymd(m[1], +m[2], +m[3]);
+
+  // Day-first: 30/07/2026, 30-7-26, 30.07.2026. Falls back to month-first
+  // only when the first part cannot be a day-of-month reading (e.g. 07/30/26).
+  m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})$/);
+  if (m) {
+    let day = +m[1], mon = +m[2], year = +m[3];
+    if (!dayFirst) { const t = day; day = mon; mon = t; }
+    // Whatever the header claimed, a part above 12 can only be the day.
+    if (mon > 12 && day <= 12) { const t = day; day = mon; mon = t; }
+    if (year < 100) year += 2000;
+    if (mon < 1 || mon > 12 || day < 1 || day > 31) return null;
+    return ymd(year, mon, day);
+  }
+
+  // "4-Jul-26", "July 4, 2026", etc.
+  const d = new Date(s);
+  if (isNaN(d)) return null;
+  // A year-less string ("JULY 4") parses to year 2001 — treat that as no date
+  // rather than inventing one two decades off.
+  if (!/\d{4}|\d{2}\s*$|['\-/.]\s*\d{2}$/.test(s)) return null;
+  return ymd(d.getFullYear(), d.getMonth() + 1, d.getDate());
 }
 
+// "INVOICE DATE (MM/DD/YYYY)" -> "INVOICE DATE". The sheet routinely documents
+// its own date format inside the header, and that hint must not stop the
+// column from being recognised — an unmapped date column silently blanked
+// every date in the report.
+const stripHint = (s) => s.replace(/\s*\([^)]*\)\s*$/, "").trim();
+
+/*
+ * Header row -> { field: columnIndex }.
+ *
+ * Matching runs in three passes, strictest first: exact (with any trailing
+ * "(...)" hint stripped), then prefix, then substring. Running each pass
+ * across ALL fields before starting the next is what keeps it safe — a loose
+ * alias like "COMMISSION" can never steal a column that "RDR COMMISSION
+ * AMOUNT" matches exactly, because the exact pass has already claimed it.
+ * A claimed column is never handed to a second field.
+ */
 function mapHeaders(headerRow) {
   const cells = headerRow.map(norm);
-  const map = {};
-  for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
-    for (const a of aliases) {
-      const na = norm(a);
-      const idx = PREFER_LAST.has(field) ? cells.lastIndexOf(na) : cells.indexOf(na);
-      if (idx >= 0) { map[field] = idx; break; }
+  const bare  = cells.map(stripHint);
+  const map = {}, taken = new Set();
+
+  const PASSES = [
+    (c, b, a) => c === a || b === a,
+    (c, b, a) => c.startsWith(a) || b.startsWith(a),
+    // Substring is the loosest rule, so short aliases ("PJ", "WT") sit it out
+    // rather than latching onto an unrelated column.
+    (c, b, a) => a.length >= 4 && (c.includes(a) || b.includes(a)),
+  ];
+
+  for (const match of PASSES) {
+    for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
+      if (map[field] != null) continue;
+      for (const alias of aliases) {
+        const a = norm(alias);
+        const hits = [];
+        for (let i = 0; i < cells.length; i++) {
+          if (!taken.has(i) && match(cells[i], bare[i], a)) hits.push(i);
+        }
+        if (!hits.length) continue;
+        const idx = PREFER_LAST.has(field) ? hits[hits.length - 1] : hits[0];
+        map[field] = idx; taken.add(idx);
+        break;
+      }
     }
   }
   return map;
+}
+
+/*
+ * Which way round an ambiguous text date reads, taken from the header itself:
+ * "Invoice Date (mm/dd/yyyy)" -> month first, "(dd/mm/yyyy)" -> day first.
+ * Real Excel date cells are unaffected; this only steers the text fallback.
+ * With no hint we assume day-first, which is the local convention.
+ */
+function dayFirstFromHeader(header) {
+  const m = String(header ?? "").toUpperCase().match(/\(([^)]*)\)/);
+  if (!m) return true;
+  const d = m[1].indexOf("D"), mo = m[1].indexOf("M");
+  if (d < 0 || mo < 0) return true;
+  return d < mo;
 }
 
 // Parse one sheet's array-of-arrays into records. Returns null if no usable
@@ -57,6 +155,9 @@ function parseSheet(aoa, sheetName) {
     }
   }
   if (headerIdx < 0) return null;
+
+  const header = (aoa[headerIdx] || []).map((c) => String(c ?? "").trim());
+  const dayFirst = dayFirstFromHeader(map.date != null ? header[map.date] : "");
 
   const records = [];
   for (let i = headerIdx + 1; i < aoa.length; i++) {
@@ -73,7 +174,7 @@ function parseSheet(aoa, sheetName) {
     const supplier = blank(get("supplier"));
     const itemType = blank(get("itemType"));
     records.push({
-      date: toISO(get("date")),
+      date: toISO(get("date"), dayFirst),
       invoice: String(get("invoice") ?? "").trim(),
       client,
       pjCode: String(get("pjCode") ?? "").trim(),
@@ -93,7 +194,7 @@ function parseSheet(aoa, sheetName) {
       sheet: sheetName,
     });
   }
-  return { records, columns: Object.keys(map) };
+  return { records, columns: Object.keys(map), header };
 }
 
 function parseWorkbookBuffer(buf) {
@@ -123,13 +224,30 @@ function parseWorkbookBuffer(buf) {
   }
   const used = masters.length ? masters : [names[0]];
 
-  let records = [], columns = new Set();
+  let records = [], columns = new Set(), header = [];
   for (const n of used) {
     records = records.concat(parsedByName[n].records);
     parsedByName[n].columns.forEach((c) => columns.add(c));
+    if (!header.length) header = parsedByName[n].header || [];
   }
 
   const dates = records.map((r) => r.date).filter(Boolean).sort();
+
+  /* An unmapped or unparseable date column used to fail silently: the upload
+   * reported "163 rows loaded" and every Date cell in the report was blank.
+   * Say so out loud instead, and name the headers we could not place so the
+   * spreadsheet can be corrected (or an alias added to config.js). */
+  const warnings = [];
+  if (!columns.has("date")) {
+    warnings.push(
+      "The invoice date column was not recognised, so every row loaded without a date. " +
+      "Date filters and the monthly breakdown will be empty. Headers found: " +
+      header.filter(Boolean).join(" | "));
+  } else if (dates.length < records.length) {
+    warnings.push(
+      `${records.length - dates.length} of ${records.length} rows have no readable invoice date ` +
+      "and will be excluded by any date filter.");
+  }
   return {
     records,
     meta: {
@@ -140,6 +258,12 @@ function parseWorkbookBuffer(buf) {
       missing: Object.keys(COLUMN_ALIASES).filter((k) => !columns.has(k)),
       minDate: dates[0] || null,
       maxDate: dates[dates.length - 1] || null,
+      // Surfaced so a date column that failed to parse is visible in the
+      // upload summary instead of quietly showing up as blank Date cells.
+      datesParsed: dates.length,
+      datesMissing: records.length - dates.length,
+      header,
+      warnings,
       uploadedAt: new Date().toISOString(),
     },
   };

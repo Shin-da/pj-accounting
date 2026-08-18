@@ -390,12 +390,17 @@ app.post("/api/upload", auth.requireRole("admin"), upload.single("file"), wrap(a
     });
     res.json({
       ok: true, partner: partner.slug, meta: parsed.meta, rows: saved.rows,
-      warnings: collisions.length ? [
-        `${collisions.length} invoice number(s) in this file already exist as manually-created ` +
-        `invoices and now appear twice: ${collisions.slice(0, 5).join(", ")}` +
-        (collisions.length > 5 ? "…" : "") +
-        ". Delete the manual copies, or remove them from the spreadsheet."
-      ] : [],
+      // Parser warnings (unrecognised date column, unreadable dates) come
+      // first: they affect every row, where a collision affects a handful.
+      warnings: [
+        ...(parsed.meta.warnings || []),
+        ...(collisions.length ? [
+          `${collisions.length} invoice number(s) in this file already exist as manually-created ` +
+          `invoices and now appear twice: ${collisions.slice(0, 5).join(", ")}` +
+          (collisions.length > 5 ? "…" : "") +
+          ". Delete the manual copies, or remove them from the spreadsheet."
+        ] : []),
+      ],
     });
   } catch (e) {
     res.status(500).json({ error: "could not read file: " + e.message });

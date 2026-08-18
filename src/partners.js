@@ -77,8 +77,13 @@ function recordToRow(datasetId, slug, r, i) {
 /** Convert a database row back into the camelCase shape the app expects. */
 function rowToRecord(row) {
   return {
+    // A DATE column comes back from pg as a Date at LOCAL midnight, so
+    // toISOString() would shift it to the previous day anywhere east of UTC.
+    // Read the local calendar parts instead.
     date: row.txn_date
-      ? (row.txn_date instanceof Date ? row.txn_date.toISOString().slice(0, 10) : String(row.txn_date).slice(0, 10))
+      ? (row.txn_date instanceof Date
+          ? `${row.txn_date.getFullYear()}-${String(row.txn_date.getMonth() + 1).padStart(2, "0")}-${String(row.txn_date.getDate()).padStart(2, "0")}`
+          : String(row.txn_date).slice(0, 10))
       : null,
     invoice: row.invoice || "",
     client: row.client || "",

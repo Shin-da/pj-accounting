@@ -809,11 +809,27 @@ $("#doUpload")?.addEventListener("click", async () => {
   $("#uploadMsg").textContent = "Uploading…";
   const r = await (await fetch("/api/upload", { method:"POST", body: fd })).json();
   if (r.ok) {
-    $("#uploadMsg").textContent = `Loaded "${r.meta.fileName}" — ${r.meta.rows} rows for ${r.partner}. Saved to ${r.path}.`;
+    const dated = r.meta.datesParsed != null ? `, ${r.meta.datesParsed} dated` : "";
+    let msg = `Loaded "${r.meta.fileName}" — ${r.rows} rows${dated} for ${r.partner}.`;
+    const warnings = r.warnings || [];
+    if (warnings.length) {
+      // Warnings were being computed and then thrown away. A file that loads
+      // every row but no dates looked like a clean success — hold the dialog
+      // open and say what is wrong instead of auto-closing over it.
+      $("#uploadMsg").style.color = "var(--warning)";
+      $("#uploadMsg").textContent = msg + " " + warnings.join(" ");
+    } else {
+      $("#uploadMsg").style.color = "";
+      $("#uploadMsg").textContent = msg;
+    }
     const d = await (await fetch("/api/partners")).json(); partnersCache = d.partners; updateUploadCurrent();
-    setTimeout(()=>{ closeModals(); if (r.partner===partnerSlug) load(); }, 1600);
+    if (r.partner === partnerSlug) load();
+    if (!warnings.length) setTimeout(closeModals, 1600);
   }
-  else $("#uploadMsg").textContent = "Failed: " + (r.error || "unknown");
+  else {
+    $("#uploadMsg").style.color = "var(--danger)";
+    $("#uploadMsg").textContent = "Failed: " + (r.error || "unknown");
+  }
 });
 
 $("#userBtn")?.addEventListener("click", (e) => { e.stopPropagation(); $("#userMenu").hidden = !$("#userMenu").hidden; });
