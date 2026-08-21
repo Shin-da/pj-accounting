@@ -9,3 +9,11 @@ is wiped on each redeploy on a free host. Upload for a quick change; commit the
 file here once the logo is final.
 
 An uploaded logo takes priority over the committed one.
+
+## `pj-logo.png` is reserved
+
+That file is the Perfect Jewel mark shown in the header for admin/owner/
+superadmin accounts (see `renderBrandMark()` in `public/app.js`) — it is
+served directly as a static file, not through the partner-logo lookup.
+Don't give a partner the slug `pj-logo`; a file named after it here would
+collide with this one.

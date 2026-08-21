@@ -207,17 +207,35 @@ function fillPartnerSelect(sel) {
   $(sel).innerHTML = ME.partners.map(p => `<option value="${p.slug}">${esc(p.name)}</option>`).join("");
 }
 
-// Header mark: the selected partner's logo, or their initials as a fallback.
+// Header mark: what it shows depends on who's signed in, not on which
+// partner's data happens to be on screen.
+//  - admin / owner / superadmin → always the Perfect Jewel mark. These roles
+//    can switch the partner filter to look at anyone's numbers, but the
+//    logo identifies the account that's logged in, so it stays fixed.
+//  - partner → their own logo (or initials, if none is set). Partner
+//    accounts have no switcher, so this is always just "their" logo.
 function initialsOf(name) {
   return String(name || "").split(/\s+/).filter(Boolean).slice(0, 2)
     .map(w => w[0]).join("").toUpperCase() || "•";
 }
 function renderBrandMark() {
-  const p = (ME.partners || []).find(x => x.slug === partnerSlug);
   const mark = $("#brandMark");
-  $("#brandInitials").textContent = initialsOf(p && p.name);
   const old = mark.querySelector("img"); if (old) old.remove();
   mark.classList.remove("has-img");
+
+  if (ME.user.role !== "partner") {
+    $("#brandInitials").textContent = "PJ";
+    const img = new Image();
+    img.alt = "Perfect Jewel";
+    img.onload = () => mark.classList.add("has-img");
+    img.onerror = () => img.remove();
+    img.src = "/logos/pj-logo.png";
+    mark.appendChild(img);
+    return;
+  }
+
+  const p = (ME.partners || []).find(x => x.slug === partnerSlug);
+  $("#brandInitials").textContent = initialsOf(p && p.name);
   if (p && p.hasLogo) {
     const img = new Image();
     img.alt = p.name + " logo";
