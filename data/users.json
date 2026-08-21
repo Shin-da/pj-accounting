@@ -1,0 +1,98 @@
+[
+  {
+    "id": "1302a8ae-3048-415d-9fe1-c329bca3e1e5",
+    "email": "jeffmathewg@gmail.com",
+    "name": "Accounting Admin",
+    "role": "admin",
+    "partner": null,
+    "salt": "8ad823ba9f1e76c8ae3995fafa22cf59",
+    "hash": "cb7dca0217bfb168e7abdfafe9628ebfd249abad7d702f968dac9c07a833f57dbc354c1e7f585c17682fac3653242a3dffcb038da10da9686aad6e7d87cef139",
+    "disabled": false,
+    "mustChange": false,
+    "createdAt": "2026-08-10T05:48:42.728Z"
+  },
+  {
+    "id": "34312d08-9c63-43d0-91d2-33b5852eedb6",
+    "email": "alvin@perfectjewelry.com",
+    "name": "Alvin Esperida",
+    "role": "admin",
+    "partner": null,
+    "salt": "9e527622cc46c658535acfb79f115443",
+    "hash": "8762d059f6d657c6ac651e4e1acb66acbdf9faeff897502e39545bcaf0d86f9e97450a5f585129d89a6fa55895bf03993e5d923d4d87f977c400a425e990c053",
+    "disabled": false,
+    "mustChange": false,
+    "createdAt": "2026-08-10T08:34:12.518Z"
+  },
+  {
+    "id": "70f96277-ba6f-43b9-a016-2ec017379e62",
+    "email": "alvin@perfectjewel.com",
+    "name": "Alvin Esperida",
+    "role": "owner",
+    "partner": null,
+    "salt": "3eb97763d8da075023ff0df61c0a2473",
+    "hash": "d1713d3088cf7788eae471768a348ac82e3fc436239f622fbaea9315f41671f9e56a7b3cc02035ecd7e0467fd048d8a121e842116978c7bab9e408d7b56e268d",
+    "disabled": true,
+    "mustChange": true,
+    "createdAt": "2026-08-10T08:31:37.472Z"
+  },
+  {
+    "id": "2ad73125-104e-49f0-bf1e-27f00bb0834e",
+    "email": "rdrstaff@perfectjewelry.com",
+    "name": "rdrstaff",
+    "role": "partner",
+    "partner": "rdr",
+    "salt": "c3f745f198a7685d50e9ba9e708c3a96",
+    "hash": "b10f97a12bf8a72f951153fe455774bd83c086ef653c05ca649647e3278eab3ff9528f560408f62f39a0566d66c6d8707535e1dcfe242d74b5762d87a2150300",
+    "disabled": false,
+    "mustChange": false,
+    "createdAt": "2026-08-10T08:31:05.624Z"
+  },
+  {
+    "id": "",
+    "email": "brandongilbert@perfectjewelry.com",
+    "name": "Brandon Garcia",
+    "role": "admin",
+    "partner": null,
+    "salt": "bfc3714b5f59dfe2b869a40977ec852a",
+    "hash": "cd1fb56db66cbd47f976707f51f6a03af41559eabc9e5fdd04f9b5974be943b92c472a7b9d501ca0dff7b982fe9d20d212881f919e7b3b0baf9132883eb17e1e",
+    "disabled": false,
+    "mustChange": false,
+    "createdAt": "2026-08-21T00:00:00.000Z"
+  },
+  {
+    "id": "9ea79ebf-0d81-4815-95c3-a2f2f6de9f25",
+    "email": "onelive_accounting@al-marcorp.com",
+    "name": "Cylver John",
+    "role": "admin",
+    "partner": null,
+    "salt": "2946cf3bdc2af9907f819d499aceea0c",
+    "hash": "434466a97706c12c9b13fb0eac03beb1210a4fa5740fef37cb2df80db775edbfa2226fbf9b40af133f35799d603093016dc293c4d0775fd3ff63874eb4ce8c01",
+    "disabled": false,
+    "mustChange": false,
+    "createdAt": "2026-08-10T08:33:33.255Z"
+  },
+  {
+    "id": "7fc63cb8-0137-4550-941a-977d4b31b881",
+    "email": "owner@perfectjewelry.com",
+    "name": "owner",
+    "role": "owner",
+    "partner": null,
+    "salt": "444e12a488a049f42ca18615782da6bc",
+    "hash": "13460eababb345f6552e20350d9d9bd9c148937ad6d6c400905527c052eb2d2525b065173928536e5730c3ab539a9d98cb827b4e7438617703f1238aac2d15f1",
+    "disabled": false,
+    "mustChange": true,
+    "createdAt": "2026-08-10T09:59:46.331Z"
+  },
+  {
+    "id": "b8a4f7c2-78eb-4e9f-a3bb-7d2d2e1d0d6a",
+    "email": "triarastaff@perfectjewelry.com",
+    "name": "Triara Staff",
+    "role": "partner",
+    "partner": "triara",
+    "salt": "30f53bcda66b1ad0d48dacb3c39b774e",
+    "hash": "6e6b69f6803c4011e3b4c5800aa1ea0f379af4b0959582c44d3484172bc2d4a3e876d8af25bf5d2c464470e88d6b6e6729546173f54dfdbfc2f9ae2e7c27417d",
+    "disabled": false,
+    "mustChange": false,
+    "createdAt": "2026-08-21T00:00:00.000Z"
+  }
+]
