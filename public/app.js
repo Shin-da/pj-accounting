@@ -190,9 +190,9 @@ async function boot() {
   sw.innerHTML = me.partners.map(p => `<option value="${p.slug}">${esc(p.name)}</option>`).join("");
   partnerSlug = me.partners[0] ? me.partners[0].slug : "";
   $("#partnerSwitchWrap").hidden = me.user.role === "partner" || me.partners.length <= 1;
-  if (me.partners[0]) $("#brandSub").textContent = me.partners.find(p=>p.slug===partnerSlug)?.name || "";
   sw.value = partnerSlug;
-  sw.addEventListener("change", () => { partnerSlug = sw.value; $("#brandSub").textContent = me.partners.find(p=>p.slug===partnerSlug)?.name||""; renderBrandMark(); filters.client = ""; $("#fClient").value = ""; refreshAll(); });
+  sw.addEventListener("change", () => { partnerSlug = sw.value; renderBrandText(); renderBrandMark(); filters.client = ""; $("#fClient").value = ""; refreshAll(); });
+  renderBrandText();
   renderBrandMark();
 
   if (isAdmin) { fillPartnerSelect("#uploadPartner"); fillPartnerSelect("#nuPartner"); }
@@ -217,6 +217,18 @@ function fillPartnerSelect(sel) {
 function initialsOf(name) {
   return String(name || "").split(/\s+/).filter(Boolean).slice(0, 2)
     .map(w => w[0]).join("").toUpperCase() || "•";
+}
+
+const GENERIC_BRAND = "Secret Supplier";
+// The generic placeholder name exists for RDR's confidentiality — admin/owner
+// always see it (it identifies the account logged in, not the data on
+// screen), and so does RDR's own partner login. Any other partner should see
+// their own real name instead, not a leftover RDR-specific codename.
+function renderBrandText() {
+  const p = (ME.partners || []).find(x => x.slug === partnerSlug);
+  const showGeneric = ME.user.role !== "partner" || partnerSlug === "rdr";
+  $("#brandText").textContent = showGeneric ? GENERIC_BRAND : ((p && p.name) || GENERIC_BRAND);
+  $("#brandSub").textContent = showGeneric ? ((p && p.name) || "") : "Partner sales & commission";
 }
 function renderBrandMark() {
   const mark = $("#brandMark");
@@ -435,7 +447,6 @@ function renderTables() {
   if ("itemCode" in r0) regCols.push(["itemCode","Item code"]);
   if ("itemType" in r0) regCols.push(["itemType","Item type"]);
   regCols.push(["client","Client"]);
-  if ("supplier" in r0) regCols.push(["supplier","Supplier"]);
   if ("commissionType" in r0) regCols.push(["commissionType","Comm. type"]);
   regCols.push(["weight","Weight","num"]);
   if ("supplierPrice" in r0) regCols.push(["supplierPrice","Capital","num"]);
@@ -534,7 +545,6 @@ async function openInvoice(reserve) {
   const t = d.totals, i0 = d.items[0] || {};
 
   const cols = [["pjCode","PJ code"],["itemCode","Item code"],["itemType","Type"]];
-  if ("supplier" in i0) cols.push(["supplier","Supplier"]);
   if ("commissionType" in i0) cols.push(["commissionType","Comm. type"]);
   cols.push(["weight","Weight","num"]);
   if ("supplierPrice" in i0) cols.push(["supplierPrice","Capital","num"]);
