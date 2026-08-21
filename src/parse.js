@@ -173,6 +173,7 @@ function parseSheet(aoa, sheetName) {
     const blank = (v) => { const s = String(v ?? "").trim(); return s === "-" ? "" : s; };
     const supplier = blank(get("supplier"));
     const itemType = blank(get("itemType"));
+    const sellerStatus = blank(get("sellerStatus")).toUpperCase();
     records.push({
       date: toISO(get("date"), dayFirst),
       invoice: String(get("invoice") ?? "").trim(),
@@ -191,6 +192,7 @@ function parseSheet(aoa, sheetName) {
       commission: String(get("commission") ?? "").trim(),
       commissionType: String(get("commissionType") ?? "").trim(),
       commissionValue,
+      sellerStatus,
       sheet: sheetName,
     });
   }

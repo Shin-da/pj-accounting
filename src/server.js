@@ -223,7 +223,7 @@ function scope(agg, flags, dimension) {
     const o = { date: r.date, invoice: r.invoice, client: r.client,
       itemType: r.itemType || "—", commissionType: commLabel(r.commissionType),
       weight: r.weight, amount: r.amount, pjCode: r.pjCode || "—", itemCode: r.itemCode || "—",
-      source: r.source || "import" };
+      sellerStatus: r.sellerStatus || "", source: r.source || "import" };
     if (flags.supplier) o.supplier = r.supplier;                       // admin/owner only
     if (flags.cost) { o.supplierPrice = r.supplierPrice; o.capitalPerGram = r.capitalPerGram; }
     if (flags.commission) { o.commissionRate = r.commission; o.commissionValue = r.commissionValue; }
@@ -273,7 +273,8 @@ app.get("/api/report", auth.requireAuth, wrap(async (req, res) => {
 function scopeItem(r, flags) {
   const o = { reserve: r.invoice, date: r.date, client: r.client,
     itemType: r.itemType || "—", commissionType: commLabel(r.commissionType),
-    pjCode: r.pjCode || "—", itemCode: r.itemCode || "—", weight: r.weight, amount: r.amount };
+    pjCode: r.pjCode || "—", itemCode: r.itemCode || "—", weight: r.weight, amount: r.amount,
+    sellerStatus: r.sellerStatus || "" };
   if (flags.supplier) o.supplier = r.supplier;                        // admin/owner only
   if (flags.cost) { o.supplierPrice = r.supplierPrice; o.capitalPerGram = r.capitalPerGram; }
   if (flags.commission) { o.commissionRate = r.commission; o.commissionValue = r.commissionValue; }

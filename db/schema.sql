@@ -87,7 +87,8 @@ CREATE TABLE IF NOT EXISTS records (
     commission        TEXT,                    -- the rate as written (e.g. "5%" or 50)
     commission_type   TEXT,                    -- GOLD | JEWELRY
     commission_value  NUMERIC(16,2)  DEFAULT 0,
-    sheet             TEXT
+    sheet             TEXT,
+    seller_status     TEXT                     -- PAID | UNPAID, from the client's own sheet
 );
 -- Columns added after the first release, applied so an existing database is
 -- upgraded in place when the app starts.
@@ -101,6 +102,7 @@ ALTER TABLE records ALTER COLUMN dataset_id DROP NOT NULL;
 ALTER TABLE records ADD COLUMN IF NOT EXISTS created_by TEXT;
 ALTER TABLE records ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 ALTER TABLE records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+ALTER TABLE records ADD COLUMN IF NOT EXISTS seller_status TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_records_dataset  ON records(dataset_id);
 CREATE INDEX IF NOT EXISTS idx_records_partner  ON records(partner_slug);

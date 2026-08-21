@@ -101,6 +101,15 @@ function typePill(value, text) {
   return `<span class="pill-type${cls}">${text}</span>`;
 }
 
+/** Seller (client) payment status — PAID / UNPAID — as the same status-pill
+    badge used for user status elsewhere. */
+function statusPill(value) {
+  const t = String(value || "").toUpperCase();
+  if (t === "PAID") return `<span class="status-pill sp-active">Paid</span>`;
+  if (t === "UNPAID") return `<span class="status-pill sp-inactive">Unpaid</span>`;
+  return "N/A";
+}
+
 /** A clickable cell. `title` gets the hover summary where we have one. */
 const drill = (kind, value, text, title) =>
   `<span class="lnk${kind === "invoice" ? " lnk-inv" : ""}" data-drill="${kind}" data-val="${escA(value)}"${
@@ -454,6 +463,7 @@ function renderTables() {
   regCols.push(["amount","Item amount","num"]);
   if ("commissionRate" in r0) regCols.push(["commissionRate","Comm. rate"]);
   if ("commissionValue" in r0) regCols.push(["commissionValue","Commission amount","num"]);
+  if ("sellerStatus" in r0) regCols.push(["sellerStatus","Seller status"]);
 
   // Totals row over the FULL filtered set (server-computed).
   const T = CURRENT.totals || {};
@@ -474,6 +484,7 @@ function renderTables() {
   const regCell = (r, k, kind) => {
     if (kind === "num") return k === "weight" ? (r[k] ? grams(r[k]) : "N/A") : (r[k] ? money(r[k]) : "N/A");
     if (k === "commissionRate") return fmtRate(r[k]);
+    if (k === "sellerStatus") return statusPill(r[k]);
     const text = disp(r[k]);
     if (text === "N/A") return text;
     if (k === "invoice") return drill("invoice", r[k], text, "Open invoice " + r[k]);
@@ -551,10 +562,12 @@ async function openInvoice(reserve) {
   cols.push(["amount","Item amount","num"]);
   if ("commissionRate" in i0) cols.push(["commissionRate","Comm. rate"]);
   if ("commissionValue" in i0) cols.push(["commissionValue","Commission amount","num"]);
+  if ("sellerStatus" in i0) cols.push(["sellerStatus","Seller status"]);
   cols.unshift(["__n","#"]);
   const cell = (it, k, kind) => {
     if (kind === "num") return k === "weight" ? (it[k] ? grams(it[k]) : "N/A") : (it[k] ? money(it[k]) : "N/A");
     if (k === "commissionRate") return fmtRate(it[k]);
+    if (k === "sellerStatus") return statusPill(it[k]);
     const text = disp(it[k]);
     if (text === "N/A") return text;
     if (k === "pjCode" || k === "itemCode") return drill("q", it[k], text, "Find every row with this code");

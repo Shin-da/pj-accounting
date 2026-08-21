@@ -50,5 +50,7 @@ module.exports = {
     // The peso value of the commission (this is what the KPIs sum).
     commissionValue: ["RDR COMMISSION AMOUNT", "RDR COMMISSION TOTAL VALUE",
                       "COMMISSION TOTAL VALUE", "RDR COMMISSION TOTAL", "COMMISSION VALUE", "COMMISSION AMOUNT"],
+    // Whether the client has paid for the item yet (PAID / UNPAID).
+    sellerStatus: ["SELLER STATUS", "SELLER PAYMENT STATUS", "PAYMENT STATUS"],
   },
 };

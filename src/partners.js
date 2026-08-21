@@ -58,7 +58,7 @@ const REC_COLS = [
   "dataset_id", "partner_slug", "row_no", "txn_date", "invoice", "client",
   "pj_code", "item_code", "item_type", "supplier", "weight", "capital_per_gram",
   "supplier_price", "amount", "onelive", "commission", "commission_type",
-  "commission_value", "sheet",
+  "commission_value", "sheet", "seller_status",
 ];
 
 /** Convert a parsed record (camelCase, from parse.js) into a row array. */
@@ -71,6 +71,7 @@ function recordToRow(datasetId, slug, r, i) {
     Number(r.amount) || 0, Number(r.onelive) || 0,
     r.commission == null ? null : String(r.commission),
     r.commissionType || null, Number(r.commissionValue) || 0, r.sheet || null,
+    r.sellerStatus || null,
   ];
 }
 
@@ -100,6 +101,7 @@ function rowToRecord(row) {
     commissionType: row.commission_type || "",
     commissionValue: Number(row.commission_value) || 0,
     sheet: row.sheet || "",
+    sellerStatus: row.seller_status || "",
     source: row.source || "import",
   };
 }
