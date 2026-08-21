@@ -236,13 +236,17 @@ const GENERIC_BRAND = "Secret Supplier";
 function renderBrandText() {
   const p = (ME.partners || []).find(x => x.slug === partnerSlug);
   const showGeneric = ME.user.role !== "partner" || partnerSlug === "rdr";
-  $("#brandText").textContent = showGeneric ? GENERIC_BRAND : ((p && p.name) || GENERIC_BRAND);
+  const name = showGeneric ? GENERIC_BRAND : ((p && p.name) || GENERIC_BRAND);
+  $("#brandText").textContent = name;
   $("#brandSub").textContent = showGeneric ? ((p && p.name) || "") : "Partner sales & commission";
+  document.title = name + " — Partner Sales";
 }
 function renderBrandMark() {
   const mark = $("#brandMark");
   const old = mark.querySelector("img"); if (old) old.remove();
   mark.classList.remove("has-img");
+
+  const favicon = $("#favicon");
 
   if (ME.user.role !== "partner") {
     $("#brandInitials").textContent = "PJ";
@@ -252,18 +256,22 @@ function renderBrandMark() {
     img.onerror = () => img.remove();
     img.src = "/logos/pj-logo.png";
     mark.appendChild(img);
+    favicon.href = "/logos/pj-logo.png";
     return;
   }
 
   const p = (ME.partners || []).find(x => x.slug === partnerSlug);
   $("#brandInitials").textContent = initialsOf(p && p.name);
+  favicon.href = "/logos/pj-logo.png";
   if (p && p.hasLogo) {
+    const url = `/api/partner-logo?partner=${encodeURIComponent(p.slug)}&t=${Date.now()}`;
     const img = new Image();
     img.alt = p.name + " logo";
     img.onload = () => mark.classList.add("has-img");
     img.onerror = () => img.remove();
-    img.src = `/api/partner-logo?partner=${encodeURIComponent(p.slug)}&t=${Date.now()}`;
+    img.src = url;
     mark.appendChild(img);
+    favicon.href = url;
   }
 }
 
