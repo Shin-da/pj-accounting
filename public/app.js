@@ -326,9 +326,7 @@ async function load() {
   }
   CURRENT = data;
   $("#emptyState").hidden = true; $("#overviewContent").hidden = false; $("#filterBar").hidden = false;
-  $("#updatedFoot").textContent = data.meta
-    ? (data.meta.fileName ? data.meta.fileName + " · " : "") + "Updated " + data.meta.uploadedAt.slice(0,10)
-    : "—";
+  $("#updatedFoot").textContent = data.meta ? "Updated " + data.meta.uploadedAt.slice(0,10) : "—";
   $("#ncRows").textContent = data.rowsTotal.toLocaleString();
   $("#ncClients").textContent = data.clients.length;
   $("#ncTypes").textContent = data.types.length;
