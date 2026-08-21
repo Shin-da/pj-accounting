@@ -314,10 +314,18 @@ function aggregate(records, { from, to } = {}) {
     ct.amount += r.amount; ct.commissionValue += r.commissionValue; ct.weight += r.weight; ct.count += 1;
     byCommType.set(ckey, ct);
 
-    const mk = (r.date || "").slice(0, 7) || "—";
-    const m = byMonth.get(mk) || { month: mk, amount: 0, commissionValue: 0 };
-    m.amount += r.amount; m.commissionValue += r.commissionValue;
-    byMonth.set(mk, m);
+    // Undated rows have no place on a chronological trend line — including
+    // them created a "—" bucket that sorted BEFORE every real month
+    // (localeCompare puts "—" ahead of "2026-07"), so the line chart's first
+    // point was a nonsense one instead of the earliest real month. They're
+    // still counted in every other total (kpi.amount, clients, types) —
+    // just not here.
+    if (r.date) {
+      const mk = r.date.slice(0, 7);
+      const m = byMonth.get(mk) || { month: mk, amount: 0, commissionValue: 0 };
+      m.amount += r.amount; m.commissionValue += r.commissionValue;
+      byMonth.set(mk, m);
+    }
   }
   kpi.margin = kpi.amount - kpi.cost;
 
