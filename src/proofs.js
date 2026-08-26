@@ -39,10 +39,20 @@ async function hasProof(partnerSlug, reserve) {
   return !!row;
 }
 
+/** Clear a proof entirely — e.g. a wrong image was uploaded and there's
+ *  nothing to replace it with yet. Returns true if a row was actually
+ *  removed, false if there was nothing there to begin with. */
+async function deleteProof(partnerSlug, reserve) {
+  const row = await db.one(
+    "DELETE FROM proofs WHERE partner_slug = $1 AND reserve = $2 RETURNING uploaded_at",
+    [partnerSlug, String(reserve).trim()]);
+  return !!row;
+}
+
 /** Set of reserve numbers that have a proof — used for the list badges. */
 async function proofSet(partnerSlug) {
   const rows = await db.query("SELECT reserve FROM proofs WHERE partner_slug = $1", [partnerSlug]);
   return new Set(rows.map((r) => r.reserve));
 }
 
-module.exports = { setProof, getProof, hasProof, proofSet };
+module.exports = { setProof, getProof, hasProof, proofSet, deleteProof };

@@ -344,6 +344,23 @@ app.get("/api/invoice-proof", auth.requireAuth, wrap(async (req, res) => {
   res.end(proof.bytes);
 }));
 
+// Clear a proof entirely — for a wrong upload with nothing to replace it
+// with yet. Logged to the audit trail like every other admin action here.
+app.delete("/api/invoice-proof", auth.requireRole("admin"), wrap(async (req, res) => {
+  const partner = await partners.getPartner((req.body && req.body.partner) || "");
+  const reserve = req.body && req.body.reserve;
+  if (!partner) return res.status(400).json({ error: "unknown partner" });
+  if (!reserve) return res.status(400).json({ error: "reserve required" });
+  const removed = await proofs.deleteProof(partner.slug, reserve);
+  if (removed) {
+    await invoices.audit(null, {
+      actor: req.user.email, action: "delete_invoice_proof",
+      partnerSlug: partner.slug, entity: reserve, details: {},
+    });
+  }
+  res.json({ ok: true, removed });
+}));
+
 // ── owner portfolio (admin + owner) ──────────────────────
 app.get("/api/portfolio", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
   const { from, to } = req.query;

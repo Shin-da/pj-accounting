@@ -591,10 +591,14 @@ async function openInvoice(reserve) {
   let proofHtml = d.proof
     ? `<img class="inv-proof-img" src="${d.proof.url}" alt="invoice proof"><div class="page-sub" style="margin-top:6px;">Uploaded ${d.proof.uploadedAt.slice(0,10)}</div>`
     : `<div class="inv-proof-empty">No proof of invoice uploaded yet.</div>`;
-  if (d.canUpload) proofHtml += `<div style="margin-top:12px;">
+  if (d.canUpload) {
+    const r = reserve.replace(/'/g,"\\'");
+    proofHtml += `<div style="margin-top:12px;">
       <input type="file" id="proofFile" accept="image/*">
-      <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="uploadProof('${reserve.replace(/'/g,"\\'")}')">${d.proof?"Replace":"Upload"} proof</button>
+      <button class="btn btn-primary btn-sm" style="margin-top:8px;" onclick="uploadProof('${r}')">${d.proof?"Replace":"Upload"} proof</button>
+      ${d.proof ? `<button class="btn btn-ghost btn-sm" style="margin-top:8px;" onclick="removeProof('${r}')">Remove proof</button>` : ""}
       <div id="proofMsg" class="page-sub" style="margin-top:6px;"></div></div>`;
+  }
 
   $("#invDetail").innerHTML = `
     <div class="inv-head">
@@ -624,6 +628,17 @@ async function uploadProof(reserve) {
   const fd = new FormData(); fd.append("file", f); fd.append("partner", partnerSlug); fd.append("reserve", reserve);
   $("#proofMsg").textContent = "Uploading…";
   const r = await (await fetch("/api/invoice-proof", { method:"POST", body: fd })).json();
+  if (r.ok) { await openInvoice(reserve); loadInvoices(); }
+  else $("#proofMsg").textContent = "Failed: " + (r.error || "unknown");
+}
+
+async function removeProof(reserve) {
+  if (!confirm("Remove the proof of invoice for " + reserve + "? This can't be undone.")) return;
+  $("#proofMsg").textContent = "Removing…";
+  const r = await (await fetch("/api/invoice-proof", {
+    method: "DELETE", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ partner: partnerSlug, reserve }),
+  })).json();
   if (r.ok) { await openInvoice(reserve); loadInvoices(); }
   else $("#proofMsg").textContent = "Failed: " + (r.error || "unknown");
 }
