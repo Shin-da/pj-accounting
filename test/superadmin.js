@@ -68,10 +68,13 @@ const t = (n,c,x)=>{ if(!c) ok=false; console.log((c?'PASS ':'FAIL ')+n+(x!==und
     (await post(ac, {name:'New',email:'new@x.com',role:'partner',partner:'rdr',password:'secret123'})).status === 200);
   t('admin CAN archive a partner account', (await patch(ac, part.id, {archived:true})).status === 200);
   t('an archived user cannot sign in', (await login('rdr@x.com')) === null);
+  t('an ordinary admin CANNOT read the user list', !!(await get(ac,'/api/users')).error);
+  t('an owner CAN read the user list',
+    Array.isArray((await get(await login('tatay@x.com'),'/api/users')).users));
   t('archived users are hidden from the list',
-    !(await get(ac,'/api/users')).users.some(u => u.email === 'rdr@x.com'));
+    !(await get(sc,'/api/users')).users.some(u => u.email === 'rdr@x.com'));
   t('...but still retrievable with ?archived=1',
-    (await get(ac,'/api/users?archived=1')).users.some(u => u.email === 'rdr@x.com'));
+    (await get(sc,'/api/users?archived=1')).users.some(u => u.email === 'rdr@x.com'));
   t('admin CAN restore them', (await patch(ac, part.id, {archived:false})).status === 200);
   t('restored user can sign in again', !!(await login('rdr@x.com')));
 

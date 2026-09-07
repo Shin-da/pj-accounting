@@ -47,11 +47,11 @@ owner sees a read-only portfolio across all partners.
 
 | Role | Can |
 |---|---|
-| `admin` | Everything: uploads, manual invoices, payouts, partner + user administration |
-| `owner` | Read-only portfolio across all partners; also records payouts |
+| `admin` | Uploads, manual invoices, payouts, partner administration. Still authorised to create/manage **partner** accounts via the API, but the Users page/nav is no longer shown to them (superadmin + owner only) |
+| `owner` | Read-only portfolio across all partners; also records payouts; sees the Users page read-only (the only non-superadmin who can) |
 | `partner` | Own report only, columns gated by `partners.flags` |
-| `viewer` | Sees everything an admin sees (incl. Partners + Users pages) but changes nothing — every write route stays admin-only |
-| superadmin | Pinned to `SUPERADMIN_EMAIL` in the env, not a row. Only they manage admin/owner accounts; their own account can't be changed from the app |
+| `viewer` | Sees everything an admin sees except the Users page — Partners page and portfolio read-only; every write route stays admin-only |
+| superadmin | Pinned to `SUPERADMIN_EMAIL` in the env, not a row. Only they manage admin/owner accounts and only they (plus `owner`, read-only) see the Users page; their own account can't be changed from the app |
 
 ### Source layout
 
@@ -139,6 +139,40 @@ See the session log entry below for detail.
 
 <!-- newest first -->
 
+### 2026-09-07 — Restrict the Users page to superadmin + owner
+
+**Commits:** `f0daf7d` (pushed to `main`)
+
+**What changed**
+- `public/index.html`: the Users nav item is tagged `data-users-nav` (was
+  `data-admin`), so it is gated independently of the Partners nav.
+- `public/app.js` `boot()`: new `canSeeUsers = superadmin || role === "owner"`
+  toggles `[data-users-nav]`. `[data-admin]` (now just the Partners nav) is
+  unchanged — still admin + viewer. Stale role comments updated; `loadUsers()`
+  comment now says "owner" instead of "viewer".
+- `src/server.js`: `GET /api/users` gate tightened from
+  `requireRole("admin", "viewer")` to `requireRole("owner")` (superadmin passes
+  every gate). Mutating `/api/users` routes are unchanged — still
+  `requireRole("admin")` plus the per-account guards in `auth.js`, so a plain
+  admin keeps partner-account management via the API even though the page is
+  hidden. An `owner` hitting the roster gets `canManage: false` → read-only.
+- `test/preflight.js`: viewer "CAN read the user list" assertions replaced with
+  "blocked from /api/users"; added an admin-blocked check and an owner block
+  (can read, `canManage` false, cannot POST).
+- `test/superadmin.js`: the archived-list checks now run as the superadmin
+  (`sc`) instead of the ordinary admin (`ac`); added "ordinary admin CANNOT read
+  the user list" and "owner CAN read the user list".
+- All four suites pass.
+
+**Decisions**
+- Kept the write routes at `admin`. Restricting them to owner/superadmin would
+  strip a plain admin's existing ability to manage partner accounts, which
+  wasn't asked for. The change is about who *sees* the page.
+
+**Resolves** the "Users nav gating" open item from the previous session.
+
+---
+
 ### 2026-09-07 — Viewer role, password eye toggle, Léspérance seed
 
 **Commits:** `81a0e69`, `487fd8e`, `d08971b`, `cc0ab19` (all pushed to `main`)
@@ -208,11 +242,6 @@ other pending `data/` entries into the Supabase DB — see Open items.
 - **`.env` line 18** holds a plaintext Supabase connection string incl. password.
   The file is gitignored, but the credential is sitting on disk in cleartext —
   consider whether it should be there.
-- **Users nav gating** — `public/index.html` was edited after the session to mark
-  the Users nav item `data-users-nav` instead of `data-admin`. The viewer code in
-  `public/app.js` unhides `[data-admin]` items for viewers, so if Users is no
-  longer `data-admin` a viewer won't see the Users nav item. Reconcile the
-  attribute and the `app.js` selector.
 - **Expenses feature** — only step 1 (partner seed) is done. Steps 2–5 blocked on
   the owner answering the §1/§7 questions in `docs/EXPENSES-DESIGN.md`.
 - **Viewer account persistence** — the account is in the Supabase DB now. If the

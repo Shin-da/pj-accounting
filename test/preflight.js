@@ -88,7 +88,16 @@ const t = (n,c,x)=>{ if(!c) ok=false; console.log((c?'PASS ':'FAIL ')+n+(x!==und
   const arep = await get(ac, '/api/report?partner=rdr');
   t('admin still sees supplier + cost', arep.rows[0].supplier!==undefined && arep.kpi.cost!==undefined);
   t('admin can switch partners', (await get(ac,'/api/report?partner=other')).partner.slug === 'other');
+  t('admin blocked from /api/users (superadmin + owner only)', !!(await get(ac,'/api/users')).error);
   t('signed-out request is refused', !!(await get(null,'/api/report?partner=rdr')).error);
+
+  // ── owner: read-only portfolio, and the one non-superadmin who sees Users ──
+  await auth.createUser({ name:'Owner', email:'owner@x.com', role:'owner', password:'secret123' });
+  const oc = await login('owner@x.com');
+  t('owner CAN read the user list', Array.isArray((await get(oc,'/api/users')).users));
+  t('owner is told it cannot manage users', (await get(oc,'/api/users')).canManage === false);
+  t('owner cannot create a user',
+    (await send(oc,'POST','/api/users',{name:'x',email:'o2@x.com',role:'partner',password:'abcdef'})).status >= 400);
 
   // ── viewer: sees everything an admin sees, changes nothing ──
   await auth.createUser({ name:'Viewer', email:'viewer@x.com', role:'viewer', password:'secret123' });
@@ -97,8 +106,7 @@ const t = (n,c,x)=>{ if(!c) ok=false; console.log((c?'PASS ':'FAIL ')+n+(x!==und
   t('viewer sees supplier + cost like an admin',
     vrep.rows[0].supplier !== undefined && vrep.kpi.cost !== undefined);
   t('viewer CAN read the portfolio', !(await get(vc,'/api/portfolio')).error);
-  t('viewer CAN read the user list', Array.isArray((await get(vc,'/api/users')).users));
-  t('viewer is told it cannot manage users', (await get(vc,'/api/users')).canManage === false);
+  t('viewer blocked from /api/users (superadmin + owner only)', !!(await get(vc,'/api/users')).error);
   t('viewer CAN read the partner list', Array.isArray((await get(vc,'/api/partners')).partners));
   t('viewer CAN read the audit trail', !(await get(vc,'/api/audit')).error);
   const vds = await get(vc, '/api/partners/rdr/datasets');

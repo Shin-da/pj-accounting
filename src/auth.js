@@ -4,10 +4,12 @@
  *  - Passwords hashed with crypto.scrypt (salt + hash), never stored plain.
  *  - Sessions are a signed cookie (HMAC-SHA256), so there is no server-side
  *    session store to lose on restart.
- *  - Roles: "admin" (full + upload + user/partner admin), "owner" (read-only
- *    portfolio across all partners), "partner" (own report only), "viewer"
- *    (sees everything an admin sees — including the Partners and Users pages —
- *    but cannot change anything; every write route stays admin-only).
+ *  - Roles: "admin" (full + upload + partner admin + partner-account admin via
+ *    the API), "owner" (read-only portfolio across all partners; read-only
+ *    Users page), "partner" (own report only), "viewer" (sees everything an
+ *    admin sees except the Users page, but cannot change anything). The Users
+ *    page / GET /api/users is superadmin + owner only; every write route stays
+ *    admin-only.
  *
  * Everything here is async now that it talks to a database. The session
  * secret lives in the settings table so logins survive a redeploy.

@@ -599,9 +599,10 @@ async function logUserChange(actor, action, target, details) {
      JSON.stringify(details || {})]);
 }
 
-// GET is admin + viewer (read-only list, no password material is returned by
-// publicUser). Every mutating /api/users route below stays admin/superadmin.
-app.get("/api/users", auth.requireRole("admin", "viewer"), wrap(async (req, res) => {
+// GET is the superadmin + owner only (read-only list, no password material is
+// returned by publicUser). Every mutating /api/users route below stays
+// admin/superadmin, with the per-account guards in auth.js.
+app.get("/api/users", auth.requireRole("owner"), wrap(async (req, res) => {
   // Archived accounts are hidden unless explicitly asked for — they are kept
   // forever so the audit trail keeps naming a person the system knows.
   const includeArchived = req.query.archived === "1";

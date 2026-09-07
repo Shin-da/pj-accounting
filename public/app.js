@@ -189,15 +189,18 @@ async function boot() {
 
   const isAdmin = me.user.role === "admin";
   const isViewer = me.user.role === "viewer";
-  // Viewer sees the whole admin picture (Portfolio, Partners, Users) read-only;
-  // owner still sees only the Portfolio.
+  // Viewer sees Portfolio + Partners read-only; owner sees Portfolio and (with
+  // the superadmin) Users. Users itself is gated separately, just below.
   const canSeeAdminArea = isAdmin || isViewer || me.user.role === "owner";
   $("#uploadBtn").hidden = !isAdmin;
   $("#btnNewInvoice").hidden = !isAdmin;
   $("#adminNav").hidden = !canSeeAdminArea;
-  // Partners + Users nav items are marked [data-admin]; a viewer still gets to
-  // open them, but every control inside renders read-only (see load* below).
+  // Partners nav is marked [data-admin]; a viewer still gets to open it, but
+  // every control inside renders read-only (see load* below).
   $$("[data-admin]").forEach(el => el.hidden = !(isAdmin || isViewer));
+  // Users nav is restricted to the superadmin and owners.
+  const canSeeUsers = !!me.user.superadmin || me.user.role === "owner";
+  $$("[data-users-nav]").forEach(el => el.hidden = !canSeeUsers);
 
   // partner switcher (admin/owner). Partners see only their own — no switcher.
   const sw = $("#partnerSwitch");
@@ -732,8 +735,8 @@ let showArchivedUsers = false;
 async function loadUsers() {
   const d = await (await fetch("/api/users?archived=" + (showArchivedUsers ? "1" : "0"))).json();
   const canPriv = !!d.canManagePrivileged;          // superadmin only
-  // Viewer sees the roster but manages nobody: the server says so via canManage,
-  // and locally anyone who isn't an admin is read-only.
+  // The owner sees the roster but manages nobody: the server says so via
+  // canManage, and locally anyone who isn't an admin is read-only.
   const canManage = d.canManage !== undefined
     ? !!d.canManage
     : !!(ME && ME.user && (ME.user.role === "admin" || ME.user.superadmin));
