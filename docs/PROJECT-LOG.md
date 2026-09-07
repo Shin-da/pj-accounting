@@ -141,7 +141,7 @@ See the session log entry below for detail.
 
 ### 2026-09-07 — Restrict the Users page to superadmin + owner
 
-**Commits:** `f0daf7d` (pushed to `main`)
+**Commits:** `3792eaf` (pushed to `main`)
 
 **What changed**
 - `public/index.html`: the Users nav item is tagged `data-users-nav` (was
