@@ -78,8 +78,8 @@ scripts/           anonymize.js, seed-dev.js
 
 ## Development history
 
-58 commits, **2026-08-10 → 2026-09-07**, all direct to `main` (no PRs, issues,
-tags). ~12,400 insertions / ~1,300 deletions across 207 file-changes. Grouped
+61 commits, **2026-08-10 → 2026-09-07**, all direct to `main` (no PRs, issues,
+tags). ~12,700 insertions / ~1,300 deletions across 216 file-changes. Grouped
 into phases below.
 
 ### Phase 1 — 2026-08-10 · Excel dashboard foundation (14 commits)
@@ -124,20 +124,57 @@ into phases below.
 - `1432d9f` (08-21) Shared-link preview shows "Perfect Jewelry Partners", not "Secret Supplier"
 - `314b75f` (08-26) A real Remove-proof action for invoice proofs
 
-### Phase 5 — 2026-09-07 · Viewer role, password UX, expenses seed (4 commits)
+### Phase 5 — 2026-09-07 · Viewer role, password UX, expenses seed, Users-page lockdown (7 commits)
 
-See the session log entry below for detail.
+See the session log entries below for detail.
 
 - `81a0e69` Read-only `viewer` role + first viewer account
 - `487fd8e` Show/hide (eye) toggle on password fields (login + change-password)
 - `d08971b` Seed the Léspérance partner on boot (expenses feature, step 1) + design doc
 - `cc0ab19` Track `CLAUDE.md`; gitignore Syncthing's `.stfolder/` marker
+- `ac24fc1` Add this project log (`docs/PROJECT-LOG.md`), reconstructed from git history
+- `3792eaf` Restrict the Users page to the superadmin and owners
+- `d85603b` Correct a commit hash in a PROJECT-LOG entry
+
+Plus non-commit work the same day: two duplicate partner rows deleted from the
+Supabase database — see the top session-log entry.
 
 ---
 
 ## Session log
 
 <!-- newest first -->
+
+### 2026-09-07 — Remove duplicate partners from Supabase; redeploy-persistence check
+
+**Commits:** none (production-DB cleanup + a gitignored file; this log update is
+the only committed artifact).
+
+**What changed**
+- **Deleted the duplicate partner rows `LT` and `TRI` from the Supabase
+  (production) database.** These were the empty "LuxeTrust" / "Triara" rows that
+  the earlier `npm run migrate` had created alongside the real `luxetrust` /
+  `triara`. Each was verified to have zero datasets, records, users, payments,
+  proofs, and logos, then deleted inside a guarded transaction that aborts if any
+  attached data is found. Supabase partners are now exactly `rdr`, `luxetrust`,
+  `triara`, `lesperance` — the Portfolio page and partner switcher no longer show
+  repeats.
+- Removed the `LT` / `TRI` entries from `data/partners.json` (untracked /
+  gitignored) so a future `npm run migrate` won't reintroduce them. The file now
+  lists only `rdr`; the real partners live in the DB.
+- No application code changed.
+
+**Q&A captured**
+- Confirmed that accounts created and passwords changed **through the app** persist
+  across Render redeploys: writes go to Supabase (external), and the Render
+  instance disk holds no user data since the Aug-11 PostgreSQL migration. The
+  `render.yaml` comment that still says "uploaded data + accounts reset on each
+  redeploy" is stale — see Open items.
+
+**Follow-ups**
+- Optionally clean up the two Brandon admin accounts (still open, below).
+
+---
 
 ### 2026-09-07 — Restrict the Users page to superadmin + owner
 
@@ -231,14 +268,20 @@ other pending `data/` entries into the Supabase DB — see Open items.
 
 ## Open items
 
-- **Duplicate empty partners in production** — `migrate` on 2026-09-07 inserted
-  `LT` ("LuxeTrust") and `TRI` ("Triara") from `data/partners.json`; the real
-  partners are `luxetrust` and `triara` (the latter holds all 8 datasets). `LT`
-  and `TRI` are empty. Left in place by choice; delete via SQL if they clutter
-  the partner switcher.
+- ~~**Duplicate empty partners in production**~~ — RESOLVED 2026-09-07. `migrate`
+  had inserted empty `LT` ("LuxeTrust") and `TRI` ("Triara") from
+  `data/partners.json` alongside the real `luxetrust` / `triara`. Both had zero
+  datasets/records/users/logos; deleted from Supabase via a guarded transaction,
+  and the `LT` / `TRI` entries removed from `data/partners.json` so a future
+  `migrate` won't reintroduce them. Supabase partners are now `rdr`, `luxetrust`,
+  `triara`, `lesperance`.
 - **Two Brandon admin accounts** — `brandongilbert@perfectjewelry.com` (migrated
   2026-09-07) and `garciabrandongilbert@perfectjewelry.com` both exist as
   `admin`. Likely the same person. Left as-is.
+- **Stale `render.yaml` comment** — it still says "the free plan has NO
+  persistent disk, so uploaded data + accounts reset on each redeploy". That has
+  been false since the 2026-08-11 PostgreSQL migration; all data lives in
+  Supabase now. Delete or rewrite the comment so it doesn't mislead.
 - **`.env` line 18** holds a plaintext Supabase connection string incl. password.
   The file is gitignored, but the credential is sitting on disk in cleartext —
   consider whether it should be there.
