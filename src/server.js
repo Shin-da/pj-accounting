@@ -748,6 +748,7 @@ async function connectDb() {
     await db.init();
     await auth.initSecret();
     await auth.seedIfEmpty("jeffmathewg@gmail.com");
+    await partners.seedPartners();
     const list = (await partners.listPartners()).map((x) => x.slug);
 
     const wasDown = markDbUp();

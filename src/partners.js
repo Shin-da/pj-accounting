@@ -15,7 +15,21 @@
  */
 const db = require("./db");
 
-const DEFAULT_FLAGS = { commission: true, cost: false, margin: false, onelive: false };
+const DEFAULT_FLAGS = { commission: true, cost: false, margin: false, onelive: false, expenses: false };
+
+/*
+ * Partners that must exist on every deploy, regardless of what's in the
+ * database. Seeded (insert-if-missing) on startup by seedPartners(), so a
+ * fresh environment — or a new partner added here — comes up ready without a
+ * manual step in the admin UI.
+ *
+ * `expenses: true` turns on the per-partner expenses ledger (see
+ * docs/EXPENSES-DESIGN.md). Only Léspérance has it; every other partner keeps
+ * the default false and the feature stays invisible to them.
+ */
+const BUILTIN_PARTNERS = [
+  { slug: "lesperance", name: "Léspérance", flags: { expenses: true } },
+];
 
 function slugify(s) {
   return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "partner";
@@ -39,6 +53,33 @@ async function createPartner({ name, flags }) {
     `INSERT INTO partners (slug, name, flags) VALUES ($1, $2, $3)
      RETURNING slug, name, flags, created_at`,
     [slug, String(name || slug).trim(), JSON.stringify({ ...DEFAULT_FLAGS, ...(flags || {}) })]);
+}
+
+/**
+ * Create a partner with an explicit slug if it doesn't exist yet. Unlike
+ * createPartner(), the slug is given (not derived from the name), so a boot
+ * seed is stable and re-running is a no-op. An existing partner is left
+ * untouched — name and flags edited in the admin UI are never clobbered by a
+ * redeploy.
+ */
+async function ensurePartner({ slug, name, flags }) {
+  const row = await db.one(
+    `INSERT INTO partners (slug, name, flags) VALUES ($1, $2, $3)
+     ON CONFLICT (slug) DO NOTHING
+     RETURNING slug, name, flags, created_at`,
+    [slug, String(name || slug).trim(), JSON.stringify({ ...DEFAULT_FLAGS, ...(flags || {}) })]);
+  return row ? { partner: row, created: true } : { partner: await getPartner(slug), created: false };
+}
+
+/** Insert-if-missing every BUILTIN_PARTNERS entry. Called once at startup. */
+async function seedPartners() {
+  const created = [];
+  for (const p of BUILTIN_PARTNERS) {
+    const { created: made } = await ensurePartner(p);
+    if (made) created.push(p.slug);
+  }
+  if (created.length) console.log(` * seeded partner(s): ${created.join(", ")}`);
+  return created;
 }
 
 async function updatePartner(slug, patch) {
@@ -193,6 +234,7 @@ async function listDatasets(slug) {
 }
 
 module.exports = {
-  DEFAULT_FLAGS, listPartners, getPartner, createPartner, updatePartner,
+  DEFAULT_FLAGS, BUILTIN_PARTNERS, listPartners, getPartner, createPartner,
+  ensurePartner, seedPartners, updatePartner,
   loadDataset, saveDataset, listDatasets, slugify,
 };
