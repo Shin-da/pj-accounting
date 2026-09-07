@@ -78,9 +78,9 @@ scripts/           anonymize.js, seed-dev.js
 
 ## Development history
 
-61 commits, **2026-08-10 → 2026-09-07**, all direct to `main` (no PRs, issues,
-tags). ~12,700 insertions / ~1,300 deletions across 216 file-changes. Grouped
-into phases below.
+62 commits, **2026-08-10 → 2026-09-07**, all direct to `main` (no PRs, issues,
+tags; a `backup-original-main` branch exists as a safety copy). ~12,700
+insertions / ~1,300 deletions across 216 file-changes. Grouped into phases below.
 
 ### Phase 1 — 2026-08-10 · Excel dashboard foundation (14 commits)
 
@@ -124,7 +124,7 @@ into phases below.
 - `1432d9f` (08-21) Shared-link preview shows "Perfect Jewelry Partners", not "Secret Supplier"
 - `314b75f` (08-26) A real Remove-proof action for invoice proofs
 
-### Phase 5 — 2026-09-07 · Viewer role, password UX, expenses seed, Users-page lockdown (7 commits)
+### Phase 5 — 2026-09-07 · Viewer role, password UX, expenses seed, Users-page lockdown (8 commits)
 
 See the session log entries below for detail.
 
@@ -135,9 +135,11 @@ See the session log entries below for detail.
 - `ac24fc1` Add this project log (`docs/PROJECT-LOG.md`), reconstructed from git history
 - `3792eaf` Restrict the Users page to the superadmin and owners
 - `d85603b` Correct a commit hash in a PROJECT-LOG entry
+- `0ca4cc6` PROJECT-LOG: session entry for the Supabase duplicate-partner cleanup
 
 Plus non-commit work the same day: two duplicate partner rows deleted from the
-Supabase database — see the top session-log entry.
+Supabase database — see the top session-log entry. (This log's own update
+commits always trail the running count by one until the next edit.)
 
 ---
 
