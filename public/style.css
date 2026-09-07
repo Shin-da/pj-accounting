@@ -3299,6 +3299,20 @@ td.num { color: var(--text); }
 .keyin { width: 100%; background: var(--bg); border: 1px solid var(--border2); color: var(--text); border-radius: var(--r-md); padding: 8px 11px; margin-bottom: 10px; font-family: var(--sans); }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
+/* Password field with a show/hide (eye) toggle. Wrap an <input> and a
+   <button class="pw-eye"> in <span class="pw-field">; the wrapper carries the
+   input's bottom margin so the button lines up with the box, not the gap. */
+.pw-field { position: relative; display: block; margin-bottom: 10px; }
+.pw-field .keyin { margin-bottom: 0; padding-right: 40px; }
+.pw-eye { position: absolute; top: 0; right: 0; height: 100%; width: 38px;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+  background: none; border: 0; cursor: pointer; color: var(--muted); }
+.pw-eye:hover { color: var(--text); }
+.pw-eye svg { width: 16px; height: 16px; display: block; }
+.pw-eye .i-hide { display: none; }
+.pw-eye.on .i-show { display: none; }
+.pw-eye.on .i-hide { display: block; }
+
 @media print {
   header, aside, .filter-bar, .page-actions, #uploadBtn { display: none !important; }
   main { margin-left: 0; } .app { margin-top: 0; }

@@ -1204,3 +1204,22 @@ async function deletePayment(id) {
   if (r.ok) { loadPayments(); load(); }
   else alert("Could not delete: " + (r.error || "unknown"));
 }
+
+// ── password show/hide toggles ───────────────────────────
+// Any <span class="pw-field"> with a <button class="pw-eye"> flips its input
+// between password and text. Runs once on load; the modal markup is static.
+function wirePwToggles(root) {
+  (root || document).querySelectorAll(".pw-eye").forEach((btn) => {
+    if (btn.dataset.wired) return;
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", () => {
+      const inp = btn.parentElement.querySelector("input");
+      if (!inp) return;
+      const reveal = inp.type === "password";
+      inp.type = reveal ? "text" : "password";
+      btn.classList.toggle("on", reveal);
+      btn.setAttribute("aria-label", reveal ? "Hide password" : "Show password");
+    });
+  });
+}
+wirePwToggles();
