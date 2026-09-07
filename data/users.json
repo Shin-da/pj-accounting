@@ -94,5 +94,17 @@
     "disabled": false,
     "mustChange": false,
     "createdAt": "2026-08-21T00:00:00.000Z"
+  },
+  {
+    "id": "f9f90818-1d54-45d2-acde-248b1f595b42",
+    "email": "perfectjewelryadmin@al-marcorp.com",
+    "name": "YLA MAE G. GONZALES (Marketing Head)",
+    "role": "viewer",
+    "partner": null,
+    "salt": "05e8cdfaed6ff7cda80255d01f254d5a",
+    "hash": "dc4398bfd2927c3dc1ee1d8ebafcf269f730383e118033fda194934082ebd2af64a68c0e6070598144eec431ac56c4066ffbef85a0d99428eeae3575f5f90880",
+    "disabled": false,
+    "mustChange": true,
+    "createdAt": "2026-09-07T00:00:00.000Z"
   }
 ]

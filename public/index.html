@@ -185,7 +185,7 @@
         <div class="overview-body">
           <div class="section-heading">Partners &amp; what they can see</div>
           <div id="partnersList"></div>
-          <div class="kpi-card" style="margin-top:16px; max-width:520px;">
+          <div class="kpi-card" id="addPartnerCard" style="margin-top:16px; max-width:520px;">
             <div class="kpi-label">Add a partner</div>
             <input class="keyin" id="newPartnerName" placeholder="Partner name (e.g. Golden Star)" style="margin-top:10px;">
             <button class="btn btn-primary btn-sm" id="addPartner" style="margin-top:8px;">Create partner</button>
@@ -201,12 +201,12 @@
               <label class="arch-toggle"><input type="checkbox" id="showArchived"> Show archived</label>
             </div>
             <table id="tblUsers"></table></div>
-          <div class="kpi-card" style="max-width:560px;">
+          <div class="kpi-card" id="addUserCard" style="max-width:560px;">
             <div class="kpi-label">Add a user</div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px;">
               <input class="keyin" id="nuName" placeholder="Name" style="margin:0;">
               <input class="keyin" id="nuEmail" placeholder="Email" style="margin:0;">
-              <select class="filter-select" id="nuRole"><option value="partner">Partner</option><option value="admin">Accounting admin</option><option value="owner">Owner</option></select>
+              <select class="filter-select" id="nuRole"><option value="partner">Partner</option><option value="viewer">Viewer</option><option value="admin">Accounting admin</option><option value="owner">Owner</option></select>
               <select class="filter-select" id="nuPartner"></select>
               <input class="keyin" id="nuPass" placeholder="Temporary password" style="margin:0; grid-column:1 / -1;">
             </div>

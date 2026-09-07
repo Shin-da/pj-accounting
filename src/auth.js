@@ -5,7 +5,9 @@
  *  - Sessions are a signed cookie (HMAC-SHA256), so there is no server-side
  *    session store to lose on restart.
  *  - Roles: "admin" (full + upload + user/partner admin), "owner" (read-only
- *    portfolio across all partners), "partner" (own report only).
+ *    portfolio across all partners), "partner" (own report only), "viewer"
+ *    (sees everything an admin sees — including the Partners and Users pages —
+ *    but cannot change anything; every write route stays admin-only).
  *
  * Everything here is async now that it talks to a database. The session
  * secret lives in the settings table so logins survive a redeploy.
@@ -15,7 +17,7 @@ const db = require("./db");
 const { SESSION_TTL_MS } = require("../config");
 
 const COOKIE = "pj_sess";
-const ROLES = ["admin", "owner", "partner"];
+const ROLES = ["admin", "owner", "partner", "viewer"];
 
 /* ── the superadmin ───────────────────────────────────────
  * Pinned to an email address in the environment, NOT to a row in the users

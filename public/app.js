@@ -184,15 +184,20 @@ async function boot() {
   ME = me; CUR = me.currency || "₱";
   $("#umName").textContent = me.user.name;
   $("#umEmail").textContent = me.user.email;
-  $("#roleText").textContent = { admin: "Accounting admin", owner: "Owner", partner: "Partner" }[me.user.role] || me.user.role;
+  $("#roleText").textContent = { admin: "Accounting admin", owner: "Owner", partner: "Partner", viewer: "Viewer" }[me.user.role] || me.user.role;
   $("#roleBadge").hidden = false;
 
   const isAdmin = me.user.role === "admin";
-  const isOwnerOrAdmin = isAdmin || me.user.role === "owner";
+  const isViewer = me.user.role === "viewer";
+  // Viewer sees the whole admin picture (Portfolio, Partners, Users) read-only;
+  // owner still sees only the Portfolio.
+  const canSeeAdminArea = isAdmin || isViewer || me.user.role === "owner";
   $("#uploadBtn").hidden = !isAdmin;
   $("#btnNewInvoice").hidden = !isAdmin;
-  $("#adminNav").hidden = !isOwnerOrAdmin;
-  $$("[data-admin]").forEach(el => el.hidden = !isAdmin);
+  $("#adminNav").hidden = !canSeeAdminArea;
+  // Partners + Users nav items are marked [data-admin]; a viewer still gets to
+  // open them, but every control inside renders read-only (see load* below).
+  $$("[data-admin]").forEach(el => el.hidden = !(isAdmin || isViewer));
 
   // partner switcher (admin/owner). Partners see only their own — no switcher.
   const sw = $("#partnerSwitch");
@@ -671,9 +676,12 @@ let partnersCache = [];
 async function loadPartners() {
   const d = await (await fetch("/api/partners")).json();
   partnersCache = d.partners;
+  // Viewer (and anyone who isn't an admin) gets this page read-only.
+  const ro = !ME || !ME.user || ME.user.role !== "admin";
+  const addCard = $("#addPartnerCard"); if (addCard) addCard.hidden = ro;
   $("#partnersList").innerHTML = d.partners.map(p => {
     const f = p.flags || {};
-    const cb = (key,label) => `<label><input type="checkbox" data-slug="${p.slug}" data-flag="${key}" ${f[key]?"checked":""}> ${label}</label>`;
+    const cb = (key,label) => `<label><input type="checkbox" data-slug="${p.slug}" data-flag="${key}" ${f[key]?"checked":""} ${ro?"disabled":""}> ${label}</label>`;
     const fileInfo = p.dataset
       ? `<div class="page-sub" style="margin-top:6px;">📄 ${esc(p.dataset.fileName || "unnamed file")} — ${p.dataset.rows.toLocaleString()} rows, uploaded ${p.dataset.uploadedAt.slice(0,10)}<br><span class="mono" style="font-size:11px;">${esc(p.dataset.path)}</span></div>`
       : `<div class="page-sub" style="margin-top:6px;">No file uploaded yet.</div>`;
@@ -687,15 +695,16 @@ async function loadPartners() {
           <div class="pr-name">${esc(p.name)} <span class="page-sub">/${p.slug}</span></div>
           <div class="page-sub">Shown in the header when viewing this partner.</div>
         </div>
-        <div class="pr-logo-actions">
+        ${ro ? "" : `<div class="pr-logo-actions">
           <input type="file" id="logoFile-${p.slug}" accept="image/*">
           <button class="btn btn-ghost btn-sm" onclick="uploadLogo('${p.slug}')">${hasLogo?"Replace":"Upload"} logo</button>
-        </div>
+        </div>`}
       </div>
       ${fileInfo}
       <div class="page-sub" style="margin:8px 0 6px;">What this partner may see:</div>
       <div class="flag-toggles">${cb("commission","Their commission")}${cb("cost","Supplier cost")}${cb("margin","Gross margin")}${cb("onelive","ONELIVE profit")}</div></div>`;
   }).join("") || `<div class="page-sub">No partners yet.</div>`;
+  if (ro) return;
   $$("#partnersList input[type=checkbox]").forEach(cb => cb.addEventListener("change", async () => {
     const flags = {}; flags[cb.dataset.flag] = cb.checked;
     await fetch("/api/partners/" + cb.dataset.slug, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ flags }) });
@@ -723,13 +732,18 @@ let showArchivedUsers = false;
 async function loadUsers() {
   const d = await (await fetch("/api/users?archived=" + (showArchivedUsers ? "1" : "0"))).json();
   const canPriv = !!d.canManagePrivileged;          // superadmin only
+  // Viewer sees the roster but manages nobody: the server says so via canManage,
+  // and locally anyone who isn't an admin is read-only.
+  const canManage = d.canManage !== undefined
+    ? !!d.canManage
+    : !!(ME && ME.user && (ME.user.role === "admin" || ME.user.superadmin));
   const cols = [["name","Name"],["email","Email"],["role","Role"],["partner","Partner"],["status","Status"],["act","",""]];
 
   const body = d.users.map(u => {
     // Mirror the server rules so the UI doesn't offer buttons that will 403.
     const privileged = u.role === "admin" || u.role === "owner";
     const isSelf = ME && ME.user && ME.user.id === u.id;
-    const locked = u.superadmin || (privileged && !canPriv);
+    const locked = !canManage || u.superadmin || (privileged && !canPriv);
     const acts = [];
     const iAmSuper = !!(ME && ME.user && ME.user.superadmin);
     if (!locked) acts.push(`<button class="btn btn-ghost btn-sm" onclick="resetPw('${u.id}')">Reset pw</button>`);
@@ -758,6 +772,14 @@ async function loadUsers() {
   }).join("");
 
   $("#tblUsers").innerHTML = `<thead><tr>${cols.map(c=>`<th>${c[1]}</th>`).join("")}</tr></thead><tbody>${body}</tbody>`;
+
+  // A viewer can read the roster but not add accounts.
+  const addCard = $("#addUserCard"); if (addCard) addCard.hidden = !canManage;
+  const hintEl = $("#userScopeHint");
+  if (!canManage) {
+    if (hintEl) hintEl.textContent = "Read-only: you can see accounts but not change them.";
+    return;
+  }
 
   // Only a superadmin can create admins/owners, so trim the role picker.
   const roleSel = $("#nuRole");

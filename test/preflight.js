@@ -90,6 +90,34 @@ const t = (n,c,x)=>{ if(!c) ok=false; console.log((c?'PASS ':'FAIL ')+n+(x!==und
   t('admin can switch partners', (await get(ac,'/api/report?partner=other')).partner.slug === 'other');
   t('signed-out request is refused', !!(await get(null,'/api/report?partner=rdr')).error);
 
+  // ── viewer: sees everything an admin sees, changes nothing ──
+  await auth.createUser({ name:'Viewer', email:'viewer@x.com', role:'viewer', password:'secret123' });
+  const vc = await login('viewer@x.com');
+  const vrep = await get(vc, '/api/report?partner=rdr');
+  t('viewer sees supplier + cost like an admin',
+    vrep.rows[0].supplier !== undefined && vrep.kpi.cost !== undefined);
+  t('viewer CAN read the portfolio', !(await get(vc,'/api/portfolio')).error);
+  t('viewer CAN read the user list', Array.isArray((await get(vc,'/api/users')).users));
+  t('viewer is told it cannot manage users', (await get(vc,'/api/users')).canManage === false);
+  t('viewer CAN read the partner list', Array.isArray((await get(vc,'/api/partners')).partners));
+  t('viewer CAN read the audit trail', !(await get(vc,'/api/audit')).error);
+  const vds = await get(vc, '/api/partners/rdr/datasets');
+  t('viewer CAN list upload history', Array.isArray(vds.datasets));
+  const vfileSt = (await fetch(base+'/api/dataset-file?id='+(vds.datasets[0]||{}).id,{headers:{cookie:vc}})).status;
+  t('viewer is not auth-blocked from the raw Excel', vfileSt !== 401 && vfileSt !== 403, 'status=' + vfileSt);
+  const vpay = await get(vc, '/api/payments?partner=rdr');
+  t('viewer sees payouts read-only', vpay.canRecord === false, 'canRecord=' + vpay.canRecord);
+  t('viewer cannot record a payment',
+    (await send(vc,'POST','/api/payments',{partner:'rdr',amount:1,paidOn:'2026-08-01'})).status >= 400);
+  t('viewer cannot create an invoice',
+    (await send(vc,'POST','/api/manual-invoice',{partner:'rdr',invoice:'X1',client:'c',date:'2026-08-01',items:[]})).status >= 400);
+  t('viewer cannot change partner flags',
+    (await send(vc,'PATCH','/api/partners/rdr',{flags:{cost:true}})).status >= 400);
+  t('viewer cannot create a user',
+    (await send(vc,'POST','/api/users',{name:'x',email:'v2@x.com',role:'viewer',password:'abcdef'})).status >= 400);
+  t('viewer cannot upload a dataset',
+    (await send(vc,'POST','/api/upload?partner=rdr')).status >= 400);
+
   const { aggregate } = require(APP + '/src/parse');
   const pay = require(APP + '/src/payments');
   const reg = aggregate((await partners.loadDataset('rdr')).records, {}).kpi.commissionValue;

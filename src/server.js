@@ -361,8 +361,8 @@ app.delete("/api/invoice-proof", auth.requireRole("admin"), wrap(async (req, res
   res.json({ ok: true, removed });
 }));
 
-// ── owner portfolio (admin + owner) ──────────────────────
-app.get("/api/portfolio", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
+// ── owner portfolio (admin + owner + viewer) ─────────────
+app.get("/api/portfolio", auth.requireRole("admin", "owner", "viewer"), wrap(async (req, res) => {
   const { from, to } = req.query;
   const rows = [];
   const grand = { amount: 0, commissionValue: 0, cost: 0, margin: 0, onelive: 0, invoices: 0, lines: 0 };
@@ -446,8 +446,8 @@ app.get("/api/partner-logo", auth.requireAuth, wrap(async (req, res) => {
   res.end(logo.bytes);
 }));
 
-// ── partner management (admin write, owner read) ─────────
-app.get("/api/partners", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
+// ── partner management (admin write; owner + viewer read) ─
+app.get("/api/partners", auth.requireRole("admin", "owner", "viewer"), wrap(async (req, res) => {
   const list = [];
   for (const p of await partners.listPartners()) {
     const ds = await partners.loadDataset(p.slug);
@@ -471,7 +471,7 @@ app.patch("/api/partners/:slug", auth.requireRole("admin"), wrap(async (req, res
 }));
 
 // Upload history — lets a bad upload be identified (and later rolled back).
-app.get("/api/partners/:slug/datasets", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
+app.get("/api/partners/:slug/datasets", auth.requireRole("admin", "owner", "viewer"), wrap(async (req, res) => {
   res.json({ datasets: await partners.listDatasets(req.params.slug) });
 }));
 
@@ -511,10 +511,11 @@ app.delete("/api/manual-invoice", auth.requireRole("admin"), wrap(async (req, re
   } catch (e) { res.status(400).json({ error: e.message }); }
 }));
 
-// ── uploaded source files (admin + owner only) ───────────
+// ── uploaded source files (admin + owner + viewer) ───────
 // Partners must NEVER get this: the raw sheet contains supplier and cost
-// columns that the whole scoping layer exists to hide.
-app.get("/api/dataset-file", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
+// columns that the whole scoping layer exists to hide. Viewer is staff-level,
+// so it is allowed alongside admin and owner.
+app.get("/api/dataset-file", auth.requireRole("admin", "owner", "viewer"), wrap(async (req, res) => {
   const row = await db.one(
     "SELECT file_name, file_mime, file_bytes FROM datasets WHERE id = $1", [req.query.id]);
   if (!row || !row.file_bytes) return res.status(404).json({ error: "file not stored for this upload" });
@@ -525,8 +526,8 @@ app.get("/api/dataset-file", auth.requireRole("admin", "owner"), wrap(async (req
   res.end(row.file_bytes);
 }));
 
-// ── audit trail (admin + owner) ──────────────────────────
-app.get("/api/audit", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
+// ── audit trail (admin + owner + viewer) ─────────────────
+app.get("/api/audit", auth.requireRole("admin", "owner", "viewer"), wrap(async (req, res) => {
   res.json({ entries: await invoices.listAudit(req.query.partner || null, 200) });
 }));
 
@@ -598,13 +599,16 @@ async function logUserChange(actor, action, target, details) {
      JSON.stringify(details || {})]);
 }
 
-app.get("/api/users", auth.requireRole("admin"), wrap(async (req, res) => {
+// GET is admin + viewer (read-only list, no password material is returned by
+// publicUser). Every mutating /api/users route below stays admin/superadmin.
+app.get("/api/users", auth.requireRole("admin", "viewer"), wrap(async (req, res) => {
   // Archived accounts are hidden unless explicitly asked for — they are kept
   // forever so the audit trail keeps naming a person the system knows.
   const includeArchived = req.query.archived === "1";
   res.json({
     users: await auth.listUsers({ includeArchived }),
     canManagePrivileged: !!req.user.superadmin,
+    canManage: req.user.role === "admin" || !!req.user.superadmin,
   });
 }));
 
