@@ -61,9 +61,13 @@ async function totalPaid(partnerSlug) {
  * commission means the partner owes Perfect Jewel — hence the `credit` status.
  */
 async function summary(partnerSlug) {
-  const earned = await totalEarned(partnerSlug);
-  const paid = await totalPaid(partnerSlug);
-  const expensesTotal = await expenses.totalExpenses(partnerSlug);
+  // Three independent aggregates — run them in one round-trip batch rather
+  // than three sequential hops to the database.
+  const [earned, paid, expensesTotal] = await Promise.all([
+    totalEarned(partnerSlug),
+    totalPaid(partnerSlug),
+    expenses.totalExpenses(partnerSlug),
+  ]);
   const balance = round2(earned - expensesTotal - paid);
   const settledUp = earned > 0 || expensesTotal > 0 || paid > 0;
   return {

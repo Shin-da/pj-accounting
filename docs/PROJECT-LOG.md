@@ -147,6 +147,43 @@ commits always trail the running count by one until the next edit.)
 
 <!-- newest first -->
 
+### 2026-09-10 — Isolation audit + partner-switch hardening
+
+**Commits:** `<this commit>` (pushed to `main` → Render redeploy)
+
+**Isolation audit (no code change — verified airtight)**
+- Built a 40-assertion test (partner users Alpha/Bravo + admin, scratch DB) and
+  confirmed: a partner hitting `/api/report|invoices|invoice?partner=<other>`
+  gets **their own** data (`resolvePartner` ignores `?partner=` for the partner
+  role); supplier names / cost / margin / ONELIVE never appear in a partner
+  payload; `invoice-proof`, `payment-proof`, `expense-proof` all 403 across
+  partners; `/api/expenses` 403s without `flags.expenses`; `portfolio`,
+  `dataset-file`, `audit`, `users`, `partners` and every write route 403 for
+  partners. "Per supplier" = supplier *names*, which are stripped everywhere a
+  partner can reach and excluded from partner search — unchanged, still holds.
+
+**Hardening (staff partner/supplier switching — speed + accuracy)**
+- **Stale-response guard** ([public/app.js](../public/app.js)): a `viewGen`
+  counter, bumped on every partner/filter change; `load`, `loadInvoices`,
+  `loadPayments`, `loadExpenses` capture it and drop their response if a newer
+  switch happened first. Fixes fast A→B switching painting A's numbers under B.
+- **Parallelised DB round-trips**: `payments.summary()` runs its three
+  aggregates with `Promise.all` (was 3 sequential hops to Singapore);
+  `/api/portfolio` fans out the per-partner dataset load+aggregate instead of a
+  blocking loop. Verified numbers identical.
+- **`resolvePartner`**: a staff request with an explicit unknown `?partner=`
+  slug now returns `null` → `/api/report` responds `404 {empty, reason:"partner
+  not found"}` instead of silently falling back to the first partner and showing
+  its numbers under the wrong name. An absent slug still defaults to the first.
+
+**Open / follow-ups**
+- **Cold start**: Render free instance spins down after ~15 min idle (~50 s
+  first request). Confirm an external keep-alive pings `/api/health` (it runs a
+  real DB query, so it keeps Supabase warm too) or accept the cold hit.
+- Optional: short-TTL client cache of report payloads for instant switch-back.
+
+---
+
 ### 2026-09-10 — Partner expenses ledger (Léspérance) — build steps 2–5
 
 **Commits:** `<this commit>` (pushed to `main` → Render redeploy)

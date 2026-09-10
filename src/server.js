@@ -194,12 +194,18 @@ function applyFilters(records, q, canSeeSupplier) {
   });
 }
 
-/** Which partner is this viewer allowed to look at? */
+/** Which partner is this viewer allowed to look at?
+ *  - partner role: always their own, `?partner=` is ignored entirely
+ *  - staff: the requested slug; an explicit slug that matches nothing returns
+ *    null (so the route reports "not found") rather than silently falling back
+ *    to the first partner and showing the wrong numbers under the wrong name.
+ *    Only an ABSENT slug defaults to the first partner. */
 async function resolvePartner(req) {
   if (req.user.role === "partner") return partners.getPartner(req.user.partner);
-  const q = req.query.partner;
+  const q = String(req.query.partner || "").trim();
   const all = await partners.listPartners();
-  return (q && all.find((p) => p.slug === q)) || all[0] || null;
+  if (q) return all.find((p) => p.slug === q) || null;
+  return all[0] || null;
 }
 
 // Remove fields the viewer isn't allowed to see, on a *copy*.
@@ -245,7 +251,12 @@ function scope(agg, flags, dimension) {
 // ── report (all roles) ───────────────────────────────────
 app.get("/api/report", auth.requireAuth, wrap(async (req, res) => {
   const partner = await resolvePartner(req);
-  if (!partner) return res.json({ empty: true, reason: "no partner assigned" });
+  if (!partner) {
+    // A partner user with no assignment vs. staff who asked for a slug that
+    // doesn't exist — different messages, neither one shows another partner.
+    const reason = String(req.query.partner || "").trim() ? "partner not found" : "no partner assigned";
+    return res.status(reason === "partner not found" ? 404 : 200).json({ empty: true, reason });
+  }
   const ds = await partners.loadDataset(partner.slug);
   const flags = effectiveFlags(req.user, partner);
   const filtered = applyFilters(ds.records, req.query, flags.supplier);
@@ -374,16 +385,17 @@ app.delete("/api/invoice-proof", auth.requireRole("admin"), wrap(async (req, res
 // ── owner portfolio (admin + owner + viewer) ─────────────
 app.get("/api/portfolio", auth.requireRole("admin", "owner", "viewer"), wrap(async (req, res) => {
   const { from, to } = req.query;
-  const rows = [];
   const grand = { amount: 0, commissionValue: 0, cost: 0, margin: 0, onelive: 0, invoices: 0, lines: 0 };
-  for (const p of await partners.listPartners()) {
+  // Each partner's dataset load + aggregate is independent — fan them out
+  // instead of walking the list one blocking round-trip at a time.
+  const rows = await Promise.all((await partners.listPartners()).map(async (p) => {
     const ds = await partners.loadDataset(p.slug);
     const a = aggregate(ds.records, { from, to }).kpi;
-    rows.push({ slug: p.slug, name: p.name, amount: a.amount, commissionValue: a.commissionValue,
+    return { slug: p.slug, name: p.name, amount: a.amount, commissionValue: a.commissionValue,
       cost: a.cost, margin: a.margin, onelive: a.onelive, invoices: a.invoices, clients: a.clients,
-      lines: a.lines, uploadedAt: ds.meta ? ds.meta.uploadedAt : null });
-    for (const k of Object.keys(grand)) grand[k] += a[k] || 0;
-  }
+      lines: a.lines, uploadedAt: ds.meta ? ds.meta.uploadedAt : null, _kpi: a };
+  }));
+  for (const r of rows) { for (const k of Object.keys(grand)) grand[k] += r._kpi[k] || 0; delete r._kpi; }
   rows.sort((x, y) => y.amount - x.amount);
   res.json({ currency: CURRENCY, partners: rows, grand });
 }));

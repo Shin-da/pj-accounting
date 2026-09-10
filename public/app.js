@@ -2,6 +2,11 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => document.querySelectorAll(s);
 let CUR = "₱", ME = null, period = "all", CURRENT = null, partnerSlug = "";
 const charts = {};
+// Bumped whenever the partner or filters change. Every async loader captures
+// it on entry and discards its response if a newer change has happened since —
+// so switching partners quickly can never paint stale numbers under the wrong
+// name. `<loader> stale, dropped` in the console = the guard doing its job.
+let viewGen = 0;
 // Global filters — shared by Overview, register, breakdowns and invoices,
 // and persisted so they survive reloads and page switches.
 let filters = { q: "", commType: "", client: "" };
@@ -31,6 +36,7 @@ function filterQS() {
   return qs;
 }
 function refreshAll() {
+  viewGen++;                    // invalidate any in-flight loader from the previous view
   saveFilters();
   $("#fClear").hidden = !(filters.q || filters.commType || filters.client);
   renderChips();
@@ -349,12 +355,16 @@ function periodRange() {
 
 // ── report ───────────────────────────────────────────────
 async function load() {
+  const gen = viewGen;
   const data = await (await fetch("/api/report?" + filterQS().toString())).json();
+  if (gen !== viewGen) return;                 // superseded by a newer partner/filter change
   if (data.empty || !data.meta) {
     CURRENT = null; $("#overviewContent").hidden = true; $("#filterBar").hidden = true;
     $("#emptyState").hidden = false;
-    $("#emptyText").textContent = data.reason === "no partner assigned"
-      ? "No partner assigned to your account yet." : "No report loaded yet for this partner.";
+    $("#emptyText").textContent =
+        data.reason === "no partner assigned" ? "No partner assigned to your account yet."
+      : data.reason === "partner not found"  ? "That partner doesn’t exist — pick one from the switcher."
+      : "No report loaded yet for this partner.";
     $("#emptyUpload").hidden = ME.user.role !== "admin";
     $("#updatedFoot").textContent = "—";
     return;
@@ -559,7 +569,9 @@ function downloadCSV() {
 // ── invoices ─────────────────────────────────────────────
 let currentInvoice = null;
 async function loadInvoices() {
+  const gen = viewGen;
   const d = await (await fetch("/api/invoices?" + filterQS().toString())).json();
+  if (gen !== viewGen) return;                 // superseded by a newer partner/filter change
   $("#ncInvoices").textContent = (d.invoices || []).length;
   if (!d.invoices || !d.invoices.length) {
     pendingInvoice = null;
@@ -1156,8 +1168,10 @@ async function editInvoice(no) {
 // A running account, not per-invoice: earned − paid = balance payable.
 // Owner + admin record payments; the partner sees it read-only.
 async function loadPayments() {
+  const gen = viewGen;
   const qs = new URLSearchParams(); if (partnerSlug) qs.set("partner", partnerSlug);
   const r = await fetch("/api/payments?" + qs);
+  if (gen !== viewGen) return;                 // superseded by a newer partner/filter change
   if (r.status === 403) {
     $("#payKpis").innerHTML = "";
     $("#tblPayments").innerHTML = "";
@@ -1165,6 +1179,7 @@ async function loadPayments() {
     return;
   }
   const d = await r.json();
+  if (gen !== viewGen) return;
   if (!d.summary) { $("#payKpis").innerHTML = `<div class="page-sub">No partner selected.</div>`; return; }
 
   const s = d.summary;
@@ -1252,14 +1267,17 @@ const EXP_CAT = { materials: "Materials / packaging", labor: "Labor", transport:
                   food: "Food", advance: "Advance", adjustment: "Adjustment", other: "Other" };
 
 async function loadExpenses() {
+  const gen = viewGen;
   const qs = new URLSearchParams(); if (partnerSlug) qs.set("partner", partnerSlug);
   const r = await fetch("/api/expenses?" + qs);
+  if (gen !== viewGen) return;                 // superseded by a newer partner/filter change
   if (r.status === 403) {
     $("#expKpis").innerHTML = ""; $("#tblExpenses").innerHTML = "";
     $("#expFormCard").hidden = true; $("#ncExpenses").textContent = "";
     return;
   }
   const d = await r.json();
+  if (gen !== viewGen) return;
   if (!d.summary) { $("#expKpis").innerHTML = `<div class="page-sub">No partner selected.</div>`; return; }
 
   const s = d.summary;
