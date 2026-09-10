@@ -215,13 +215,20 @@ async function boot() {
   partnerSlug = me.partners[0] ? me.partners[0].slug : "";
   $("#partnerSwitchWrap").hidden = me.user.role === "partner" || me.partners.length <= 1;
   sw.value = partnerSlug;
-  sw.addEventListener("change", () => { partnerSlug = sw.value; renderBrandText(); renderBrandMark(); syncExpensesNav(); filters.client = ""; $("#fClient").value = ""; refreshAll(); });
+  sw.addEventListener("change", () => {
+    partnerSlug = sw.value;
+    renderBrandText(); renderBrandMark(); syncExpensesNav();
+    filters.client = ""; $("#fClient").value = "";
+    blankReport();          // clear the old partner's numbers NOW, not after the load resolves
+    refreshAll();
+  });
   renderBrandText();
   renderBrandMark();
   syncExpensesNav();
 
   if (isAdmin) { fillPartnerSelect("#uploadPartner"); fillPartnerSelect("#nuPartner"); }
   restoreFilters();
+  blankReport();          // show "Loading…" rather than a blank panel during the first fetch
   refreshAll();
 }
 
@@ -353,20 +360,38 @@ function periodRange() {
   return {};
 }
 
+// Wipe everything derived from the current partner's report — sidebar counts,
+// the register / by-client / by-type tables, the charts, the KPI row. Called
+// the instant the partner changes so a slow load (Render cold start) can never
+// leave the PREVIOUS partner's rows and numbers on screen under the new name.
+function blankReport(msg = "Loading…") {
+  CURRENT = null;
+  ["#ncRows", "#ncClients", "#ncTypes", "#ncInvoices", "#ncPayments", "#ncExpenses"]
+    .forEach((s) => { const el = $(s); if (el) el.textContent = ""; });
+  ["#tblRegister", "#tblClients", "#tblTypes"]
+    .forEach((s) => { const el = $(s); if (el) el.innerHTML = ""; });
+  const il = $("#invList"); if (il) il.innerHTML = "";
+  Object.keys(charts).forEach((id) => { try { charts[id].destroy(); } catch (_) {} delete charts[id]; });
+  const k = $("#kpis"); if (k) k.innerHTML = "";
+  $("#overviewContent").hidden = true;
+  $("#emptyState").hidden = false;
+  $("#emptyText").textContent = msg;
+  $("#emptyUpload").hidden = true;
+  $("#updatedFoot").textContent = "—";
+}
+
 // ── report ───────────────────────────────────────────────
 async function load() {
   const gen = viewGen;
   const data = await (await fetch("/api/report?" + filterQS().toString())).json();
   if (gen !== viewGen) return;                 // superseded by a newer partner/filter change
   if (data.empty || !data.meta) {
-    CURRENT = null; $("#overviewContent").hidden = true; $("#filterBar").hidden = true;
-    $("#emptyState").hidden = false;
-    $("#emptyText").textContent =
+    blankReport(
         data.reason === "no partner assigned" ? "No partner assigned to your account yet."
       : data.reason === "partner not found"  ? "That partner doesn’t exist — pick one from the switcher."
-      : "No report loaded yet for this partner.";
+      : "No report loaded yet for this partner.");
+    $("#filterBar").hidden = true;
     $("#emptyUpload").hidden = ME.user.role !== "admin";
-    $("#updatedFoot").textContent = "—";
     return;
   }
   CURRENT = data;
