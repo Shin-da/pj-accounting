@@ -4,6 +4,15 @@ Written before building. The feature is scoped to **one partner** on purpose, so
 the design question is as much "how do we keep it from touching everyone else" as
 "what does an expense record look like".
 
+> **Status (2026-09-10): built.** Steps 1–5 below are done — `expenses` table,
+> `src/expenses.js`, routes, `payments.summary()` deduction, and the Expenses
+> page. Decisions taken where the owner hadn't answered §7: waterfall is
+> `earned − expenses − paid` (the assumption); categories are free-ish (a fixed
+> pick-list: materials / labor / transport / food / advance / adjustment /
+> other); proof is optional; a balance may go negative and the UI labels that
+> "partner owes PJ" (`status: "credit"`). Any of these is a small change if the
+> owner decides otherwise — see the notes inline.
+
 ---
 
 ## 1. What this is
@@ -133,26 +142,37 @@ edit or delete — same trust model as Payouts.
 
 ## 6. Build order
 
-1. **Seed the Léspérance partner** with `flags.expenses = true` so the deploy
-   creates it — *done, see [src/partners.js](../src/partners.js) `seedPartners()`*.
-2. `expenses` table in `schema.sql`.
-3. `src/expenses.js` + routes + `effectiveFlags` wiring.
-4. `payments.summary()` deduction + Payouts statement line.
-5. Frontend page + nav gating.
+1. ~~**Seed the Léspérance partner** with `flags.expenses = true`~~ — done,
+   [src/partners.js](../src/partners.js) `seedPartners()` / `BUILTIN_PARTNERS`.
+2. ~~`expenses` table in `schema.sql`~~ — done, [db/schema.sql](../db/schema.sql).
+3. ~~`src/expenses.js` + routes + `effectiveFlags` wiring~~ — done.
+   `effectiveFlags` now returns `expenses` off the partner flag for every role,
+   so admin/owner only see the tab on a partner that carries them.
+4. ~~`payments.summary()` deduction + Payouts statement line~~ — done. `summary()`
+   returns `{ earned, expenses, paid, balance, status }`; the Payouts KPI row and
+   the Overview "Balance payable" card show the `− expenses` term when non-zero.
+5. ~~Frontend page + nav gating~~ — done. `#page-expenses`, `loadExpenses()`,
+   `syncExpensesNav()` (re-runs on partner switch), `expenses` checkbox on the
+   Partners admin page. `/api/me` now ships each partner's `flags` for the gate.
 
-Steps 2–5 wait on the owner confirming the payout waterfall (§1). Step 1 is
-independent and safe to ship now — an unused flag on one partner changes
-nothing until the rest is built.
+If the owner moves the waterfall (§1), it's the one line in `payments.summary()`.
 
 ---
 
 ## 7. Open questions for the owner
 
-1. **Where in the waterfall do expenses sit?** `earned − expenses − paid` is the
-   assumption. Alternatives: deducted from the payout at settlement time only,
-   or shown as owed-back-to-PJ separately from the commission balance.
-2. **Can a partner's expenses exceed their commission** (negative balance = the
-   partner owes PJ)? The formula allows it; the UI should probably call it out.
-3. **Categories** — is there a fixed list Léspérance uses, or free text?
-4. **Proof required** on every expense, or optional like payments?
-5. Does Léspérance ever need to *see a breakdown by category*, or just the total?
+Built with the assumption in each case; revisit if the owner disagrees.
+
+1. **Where in the waterfall do expenses sit?** Built as `earned − expenses −
+   paid`. Alternatives: deducted at settlement time only, or tracked as
+   owed-back-to-PJ separately from the commission balance. → one line in
+   `payments.summary()`.
+2. **Can expenses exceed commission** (negative balance)? **Yes** — `summary()`
+   returns `status: "credit"` and the UI shows "partner owes PJ ₱x".
+3. **Categories** — shipped as a fixed pick-list (materials / labor / transport
+   / food / advance / adjustment / other), matching the Sep 2026 breakdown.
+   Free text instead = drop the `<select>` for an `<input>`.
+4. **Proof** — optional, like payments.
+5. **Breakdown by category for Léspérance?** Not built — the page shows the
+   per-row category and a total. A category subtotal strip is easy to add if
+   they want it.

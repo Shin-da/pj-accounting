@@ -26,6 +26,7 @@ const proofs = require("./proofs");
 const logos = require("./logos");
 const invoices = require("./invoices");
 const payments = require("./payments");
+const expenses = require("./expenses");
 
 /** Wrap an async handler so a thrown error becomes a 500 instead of a hang. */
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -132,7 +133,11 @@ app.get("/api/me", wrap(async (req, res) => {
 
   const withLogos = [];
   for (const p of visible) {
-    withLogos.push({ slug: p.slug, name: p.name, hasLogo: await logos.hasLogo(p.slug) });
+    // flags travel with the list so the frontend can gate per-partner nav
+    // (e.g. the Expenses tab) as the admin switches partners. Not sensitive:
+    // a partner only ever sees their own row here anyway.
+    withLogos.push({ slug: p.slug, name: p.name, flags: p.flags || {},
+                     hasLogo: await logos.hasLogo(p.slug) });
   }
   const own = req.user.role === "partner" ? await partners.getPartner(req.user.partner) : null;
 
@@ -159,9 +164,14 @@ app.post("/api/change-password", auth.requireAuth, wrap(async (req, res) => {
 function effectiveFlags(user, partner) {
   if (user.role === "partner") {
     const f = (partner && partner.flags) || {};
-    return { commission: !!f.commission, cost: !!f.cost, margin: !!f.margin, onelive: false, supplier: false };
+    return { commission: !!f.commission, cost: !!f.cost, margin: !!f.margin,
+             onelive: false, supplier: false, expenses: !!f.expenses };
   }
-  return { commission: true, cost: true, margin: true, onelive: true, supplier: true }; // admin/owner
+  // admin/owner see everything — but `expenses` still tracks the partner flag,
+  // so the Expenses page/routes only light up for a partner that carries them.
+  const f = (partner && partner.flags) || {};
+  return { commission: true, cost: true, margin: true, onelive: true, supplier: true,
+           expenses: !!f.expenses };
 }
 const commLabel = (v) => ({ GOLD: "Gold", JEWELRY: "Jewelry" }[String(v || "").toUpperCase()] || (v ? String(v) : "—"));
 
@@ -574,6 +584,63 @@ app.delete("/api/payments/:id", auth.requireRole("admin", "owner"), wrap(async (
 // Proof of payment. Partners may only fetch their own.
 app.get("/api/payment-proof", auth.requireAuth, wrap(async (req, res) => {
   const proof = await payments.getProof(req.query.id);
+  if (!proof) return res.status(404).end();
+  if (req.user.role === "partner" && proof.partnerSlug !== req.user.partner) {
+    return res.status(403).end();
+  }
+  res.setHeader("Content-Type", proof.mime || "application/octet-stream");
+  res.setHeader("Cache-Control", "private, max-age=60");
+  res.end(proof.bytes);
+}));
+
+// ── partner expenses ─────────────────────────────────────────────────
+// Costs the partner carries, deducted in the payout waterfall:
+//   balance payable = commission earned − expenses − total paid
+// Only for partners with flags.expenses (Léspérance today). Owner and admin
+// record; the partner sees the ledger read-only, same trust model as Payouts.
+
+app.get("/api/expenses", auth.requireAuth, wrap(async (req, res) => {
+  const partner = await resolvePartner(req);
+  if (!partner) return res.json({ expenses: [], summary: null });
+  const flags = effectiveFlags(req.user, partner);
+  if (!flags.expenses) return res.status(403).json({ error: "not available" });
+
+  res.json({
+    partner: { slug: partner.slug, name: partner.name },
+    currency: CURRENCY,
+    summary: await payments.summary(partner.slug),
+    expenses: await expenses.listExpenses(partner.slug),
+    canRecord: req.user.role === "admin" || req.user.role === "owner",
+  });
+}));
+
+app.post("/api/expenses", auth.requireRole("admin", "owner"),
+  imageUpload.single("file"), wrap(async (req, res) => {
+    const partner = await partners.getPartner((req.body && req.body.partner) || "");
+    if (!partner) return res.status(400).json({ error: "unknown partner" });
+    // Server-side scoping: expenses can only be recorded for a partner that
+    // actually carries them, regardless of what the client sends.
+    if (!partner.flags || !partner.flags.expenses) {
+      return res.status(403).json({ error: "this partner does not carry expenses" });
+    }
+    try {
+      const proof = req.file ? { mime: req.file.mimetype, bytes: req.file.buffer } : null;
+      const out = await expenses.addExpense(partner.slug, {
+        amount: req.body.amount, spentOn: req.body.spentOn, category: req.body.category,
+        description: req.body.description, reference: req.body.reference, note: req.body.note,
+      }, req.user.email, proof);
+      res.json({ ok: true, ...out });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+  }));
+
+app.delete("/api/expenses/:id", auth.requireRole("admin", "owner"), wrap(async (req, res) => {
+  try { res.json({ ok: true, ...(await expenses.deleteExpense(req.params.id, req.user.email)) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+}));
+
+// Proof of an expense. Partners may only fetch their own.
+app.get("/api/expense-proof", auth.requireAuth, wrap(async (req, res) => {
+  const proof = await expenses.getProof(req.query.id);
   if (!proof) return res.status(404).end();
   if (req.user.role === "partner" && proof.partnerSlug !== req.user.partner) {
     return res.status(403).end();

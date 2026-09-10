@@ -4,7 +4,10 @@
  * This is a running ACCOUNT, not a per-invoice flag, because that's how the
  * money actually moves: one transfer settles many invoices at once.
  *
- *     balance payable = total commission earned − total paid
+ *     balance payable = total commission earned − expenses − total paid
+ *
+ * (expenses is 0 for every partner except those with flags.expenses set —
+ * see src/expenses.js. Today that's only Léspérance.)
  *
  * Who does what:
  *   - owner + admin  record and delete payments
@@ -14,6 +17,7 @@
  * must always have an answer.
  */
 const db = require("./db");
+const expenses = require("./expenses");
 
 const ALLOWED_PROOF = { "image/jpeg": 1, "image/png": 1, "image/webp": 1,
                         "image/gif": 1, "application/pdf": 1 };
@@ -48,14 +52,24 @@ async function totalPaid(partnerSlug) {
 /**
  * The statement figures. `balance` is what we still owe — the number the
  * partner actually cares about, and the one Tatay will be asked about.
+ *
+ *     balance = earned − expenses − paid
+ *
+ * `expenses` is 0 unless the partner has flags.expenses set (only Léspérance
+ * today); expenses.totalExpenses() enforces that in SQL, so this is safe to
+ * call for everyone. A balance can now go negative — expenses + paid exceeding
+ * commission means the partner owes Perfect Jewel — hence the `credit` status.
  */
 async function summary(partnerSlug) {
   const earned = await totalEarned(partnerSlug);
   const paid = await totalPaid(partnerSlug);
-  const balance = round2(earned - paid);
+  const expensesTotal = await expenses.totalExpenses(partnerSlug);
+  const balance = round2(earned - expensesTotal - paid);
+  const settledUp = earned > 0 || expensesTotal > 0 || paid > 0;
   return {
-    earned, paid, balance,
-    status: balance <= 0.005 ? (earned > 0 ? "settled" : "nothing due")
+    earned, expenses: expensesTotal, paid, balance,
+    status: balance < -0.005 ? "credit"
+          : balance <= 0.005 ? (settledUp ? "settled" : "nothing due")
           : paid > 0 ? "partially paid" : "unpaid",
   };
 }

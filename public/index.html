@@ -57,6 +57,7 @@
         <button class="nav-item" data-page="types"><span class="ni">◇</span> By commission type <span class="n-count" id="ncTypes"></span></button>
         <button class="nav-item" data-page="invoices"><span class="ni">▧</span> Invoices <span class="n-count" id="ncInvoices"></span></button>
         <button class="nav-item" data-page="payments"><span class="ni">₱</span> Payouts <span class="n-count" id="ncPayments"></span></button>
+        <button class="nav-item" data-page="expenses" id="navExpenses" hidden><span class="ni">⊖</span> Expenses <span class="n-count" id="ncExpenses"></span></button>
       </div>
       <div class="sidebar-section" id="adminNav" hidden>
         <div class="sidebar-label">Management</div>
@@ -168,6 +169,46 @@
           <div class="section-heading">Payment history</div>
           <div class="table-wrap" style="border:1px solid var(--border); border-radius:var(--r-lg);">
             <table id="tblPayments"></table>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" id="page-expenses">
+        <div class="overview-body">
+          <div class="section-heading">Partner expenses — charged against the payout</div>
+          <div class="kpi-grid" id="expKpis"></div>
+
+          <div class="card" id="expFormCard" hidden style="max-width:640px;margin-bottom:18px;">
+            <div class="kpi-label">Record an expense</div>
+            <div class="pay-form">
+              <label class="fld">Amount<input type="number" step="0.01" id="expAmount" class="keyin" placeholder="0.00"></label>
+              <label class="fld">Date spent<input type="date" id="expDate" class="keyin"></label>
+              <label class="fld">Category
+                <select id="expCategory" class="filter-select">
+                  <option value="materials">Materials / packaging</option>
+                  <option value="labor">Labor</option>
+                  <option value="transport">Transport</option>
+                  <option value="food">Food</option>
+                  <option value="advance">Advance</option>
+                  <option value="adjustment">Adjustment</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label class="fld">Reference<input type="text" id="expRef" class="keyin" placeholder="OR / DR no. / supplier / invoices covered"></label>
+              <label class="fld" style="grid-column:1/-1;">Description<input type="text" id="expDesc" class="keyin" placeholder="what it was for"></label>
+              <label class="fld" style="grid-column:1/-1;">Note<input type="text" id="expNote" class="keyin" placeholder="optional"></label>
+              <label class="fld" style="grid-column:1/-1;">Proof (image or PDF, optional)
+                <input type="file" id="expProof" accept="image/*,application/pdf"></label>
+            </div>
+            <div style="margin-top:12px;">
+              <button class="btn btn-primary btn-sm" id="btnAddExpense">Record expense</button>
+              <span id="expMsg" class="page-sub" style="margin-left:10px;"></span>
+            </div>
+          </div>
+
+          <div class="section-heading">Expense history</div>
+          <div class="table-wrap" style="border:1px solid var(--border); border-radius:var(--r-lg);">
+            <table id="tblExpenses"></table>
           </div>
         </div>
       </section>

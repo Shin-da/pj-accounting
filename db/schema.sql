@@ -171,6 +171,35 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 CREATE INDEX IF NOT EXISTS idx_payments_partner ON payments(partner_slug, paid_on DESC);
 
+-- ── partner expenses ─────────────────────────────────────────────────
+-- Costs the partner carries that come OFF their settlement, so the payout
+-- waterfall becomes:
+--
+--     balance payable  =  commission earned  −  expenses  −  total paid
+--
+-- Scoped to partners with flags.expenses = true (only Léspérance today); the
+-- server refuses every expenses route for anyone else, and totalExpenses()
+-- joins on that flag so a stray row can never affect a balance.
+--
+-- Deliberately NOT the `records` table: expenses aren't line items, don't
+-- belong to an invoice or an upload, and must never be touched by an Excel
+-- import. A separate table keeps that structural.
+CREATE TABLE IF NOT EXISTS expenses (
+    id            BIGSERIAL PRIMARY KEY,
+    partner_slug  TEXT NOT NULL REFERENCES partners(slug) ON DELETE CASCADE,
+    amount        NUMERIC(16,2) NOT NULL,          -- always positive; it's a deduction by definition
+    spent_on      DATE NOT NULL,
+    category      TEXT,                            -- materials / labor / transport / food / other
+    description   TEXT,
+    reference     TEXT,                            -- OR no., DR no., "against RDR0031-35"
+    note          TEXT,
+    proof_mime    TEXT,
+    proof_bytes   BYTEA,
+    created_by    TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_expenses_partner ON expenses(partner_slug, spent_on DESC);
+
 -- ── app settings (session secret, etc.) ──────────────────────────────
 CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,

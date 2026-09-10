@@ -37,6 +37,7 @@ function refreshAll() {
   load();
   if (document.querySelector("#page-invoices.active")) loadInvoices();
   if (document.querySelector("#page-payments.active")) loadPayments();
+  if (document.querySelector("#page-expenses.active")) loadExpenses();
 }
 
 /* Active filters, shown as removable chips.
@@ -208,13 +209,30 @@ async function boot() {
   partnerSlug = me.partners[0] ? me.partners[0].slug : "";
   $("#partnerSwitchWrap").hidden = me.user.role === "partner" || me.partners.length <= 1;
   sw.value = partnerSlug;
-  sw.addEventListener("change", () => { partnerSlug = sw.value; renderBrandText(); renderBrandMark(); filters.client = ""; $("#fClient").value = ""; refreshAll(); });
+  sw.addEventListener("change", () => { partnerSlug = sw.value; renderBrandText(); renderBrandMark(); syncExpensesNav(); filters.client = ""; $("#fClient").value = ""; refreshAll(); });
   renderBrandText();
   renderBrandMark();
+  syncExpensesNav();
 
   if (isAdmin) { fillPartnerSelect("#uploadPartner"); fillPartnerSelect("#nuPartner"); }
   restoreFilters();
   refreshAll();
+}
+
+// The Expenses tab only exists for a partner that carries expenses (flags
+// .expenses — only Léspérance today). A partner user carries their own flags
+// on ME.flags; admin/owner read the flag off the partner they're viewing.
+function currentPartnerHasExpenses() {
+  if (ME.user.role === "partner") return !!(ME.flags && ME.flags.expenses);
+  const p = (ME.partners || []).find(x => x.slug === partnerSlug);
+  return !!(p && p.flags && p.flags.expenses);
+}
+function syncExpensesNav() {
+  const on = currentPartnerHasExpenses();
+  const nav = $("#navExpenses");
+  if (nav) nav.hidden = !on;
+  // If we're sitting on the Expenses page and it just went away, fall back.
+  if (!on && document.querySelector("#page-expenses.active")) showPage("overview");
 }
 
 const isCommDim = () => CURRENT && CURRENT.typeDimension === "commission";
@@ -296,6 +314,7 @@ $$(".nav-item").forEach(b => b.addEventListener("click", () => {
   if (b.dataset.page === "users") loadUsers();
   if (b.dataset.page === "invoices") loadInvoices();
   if (b.dataset.page === "payments") loadPayments();
+  if (b.dataset.page === "expenses") loadExpenses();
 }));
 
 // ── period + filters ─────────────────────────────────────
@@ -369,10 +388,13 @@ function renderKPIs() {
   // Balance payable is all-time (not affected by the date filter) — it's what
   // we still owe this partner overall.
   if (CURRENT.payout) {
-    const owing = CURRENT.payout.balance > 0.005;
-    cards.push({ label: "Balance payable", value: money(CURRENT.payout.balance),
-      cls: owing ? "balance-due" : "balance-clear",
-      sub: `${money(CURRENT.payout.paid)} paid of ${money(CURRENT.payout.earned)}` });
+    const po = CURRENT.payout;
+    const owing = po.balance > 0.005;
+    const sub = po.expenses > 0.005
+      ? `${money(po.earned)} earned − ${money(po.expenses)} expenses − ${money(po.paid)} paid`
+      : `${money(po.paid)} paid of ${money(po.earned)}`;
+    cards.push({ label: "Balance payable", value: money(po.balance),
+      cls: owing ? "balance-due" : "balance-clear", sub });
   }
   $("#kpis").innerHTML = cards.map(c => `<div class="kpi-card"><div class="kpi-label">${c.label}</div><div class="kpi-value ${c.cls}">${c.value}</div><div class="kpi-sub">${c.sub}</div></div>`).join("");
 }
@@ -705,12 +727,16 @@ async function loadPartners() {
       </div>
       ${fileInfo}
       <div class="page-sub" style="margin:8px 0 6px;">What this partner may see:</div>
-      <div class="flag-toggles">${cb("commission","Their commission")}${cb("cost","Supplier cost")}${cb("margin","Gross margin")}${cb("onelive","ONELIVE profit")}</div></div>`;
+      <div class="flag-toggles">${cb("commission","Their commission")}${cb("cost","Supplier cost")}${cb("margin","Gross margin")}${cb("onelive","ONELIVE profit")}${cb("expenses","Carries expenses")}</div></div>`;
   }).join("") || `<div class="page-sub">No partners yet.</div>`;
   if (ro) return;
   $$("#partnersList input[type=checkbox]").forEach(cb => cb.addEventListener("change", async () => {
     const flags = {}; flags[cb.dataset.flag] = cb.checked;
     await fetch("/api/partners/" + cb.dataset.slug, { method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({ flags }) });
+    // keep the in-memory copy in step so per-partner nav (Expenses) reacts now
+    const mp = (ME.partners || []).find(x => x.slug === cb.dataset.slug);
+    if (mp) { mp.flags = { ...(mp.flags || {}), [cb.dataset.flag]: cb.checked }; }
+    if (cb.dataset.flag === "expenses") syncExpensesNav();
   }));
 }
 async function uploadLogo(slug) {
@@ -1143,16 +1169,27 @@ async function loadPayments() {
 
   const s = d.summary;
   const owing = s.balance > 0.005;
+  // Expenses reduce the balance; the card only appears when the partner
+  // carries them (Léspérance). See the Expenses tab for the breakdown.
+  const expCard = s.expenses > 0.005
+    ? `<div class="kpi-card"><div class="kpi-label">Less: expenses</div>
+        <div class="kpi-value balance-due">− ${money(s.expenses)}</div>
+        <div class="kpi-sub">charged against the payout</div></div>`
+    : "";
+  const balSub = s.status === "credit"
+    ? `partner owes PJ ${money(-s.balance)}`
+    : esc(s.status);
   $("#payKpis").innerHTML = `
     <div class="kpi-card"><div class="kpi-label">Commission earned</div>
       <div class="kpi-value">${money(s.earned)}</div>
       <div class="kpi-sub">total, all time</div></div>
+    ${expCard}
     <div class="kpi-card"><div class="kpi-label">Total paid</div>
       <div class="kpi-value teal">${money(s.paid)}</div>
       <div class="kpi-sub">${d.payments.length} payment${d.payments.length===1?"":"s"}</div></div>
     <div class="kpi-card"><div class="kpi-label">Balance payable</div>
       <div class="kpi-value ${owing ? "balance-due" : "balance-clear"}">${money(s.balance)}</div>
-      <div class="kpi-sub">${esc(s.status)}</div></div>`;
+      <div class="kpi-sub">${balSub}</div></div>`;
 
   $("#ncPayments").textContent = d.payments.length || "";
   $("#payFormCard").hidden = !d.canRecord;
@@ -1205,6 +1242,94 @@ async function deletePayment(id) {
   if (!confirm("Delete this payment? The balance will go back up.")) return;
   const r = await (await fetch("/api/payments/" + id, { method: "DELETE" })).json();
   if (r.ok) { loadPayments(); load(); }
+  else alert("Could not delete: " + (r.error || "unknown"));
+}
+
+// ── partner expenses (charged against the payout) ────────
+// Only for a partner carrying flags.expenses. Same trust model as Payouts:
+// owner + admin record, the partner sees the ledger read-only.
+const EXP_CAT = { materials: "Materials / packaging", labor: "Labor", transport: "Transport",
+                  food: "Food", advance: "Advance", adjustment: "Adjustment", other: "Other" };
+
+async function loadExpenses() {
+  const qs = new URLSearchParams(); if (partnerSlug) qs.set("partner", partnerSlug);
+  const r = await fetch("/api/expenses?" + qs);
+  if (r.status === 403) {
+    $("#expKpis").innerHTML = ""; $("#tblExpenses").innerHTML = "";
+    $("#expFormCard").hidden = true; $("#ncExpenses").textContent = "";
+    return;
+  }
+  const d = await r.json();
+  if (!d.summary) { $("#expKpis").innerHTML = `<div class="page-sub">No partner selected.</div>`; return; }
+
+  const s = d.summary;
+  const total = d.expenses.reduce((a, e) => a + Number(e.amount || 0), 0);
+  const owing = s.balance > 0.005;
+  const balSub = s.status === "credit" ? `partner owes PJ ${money(-s.balance)}` : esc(s.status);
+  $("#expKpis").innerHTML = `
+    <div class="kpi-card"><div class="kpi-label">Total expenses</div>
+      <div class="kpi-value balance-due">${money(total)}</div>
+      <div class="kpi-sub">${d.expenses.length} entr${d.expenses.length===1?"y":"ies"}</div></div>
+    <div class="kpi-card"><div class="kpi-label">Commission earned</div>
+      <div class="kpi-value">${money(s.earned)}</div>
+      <div class="kpi-sub">total, all time</div></div>
+    <div class="kpi-card"><div class="kpi-label">Balance payable</div>
+      <div class="kpi-value ${owing ? "balance-due" : "balance-clear"}">${money(s.balance)}</div>
+      <div class="kpi-sub">earned − expenses − paid · ${balSub}</div></div>`;
+
+  $("#ncExpenses").textContent = d.expenses.length || "";
+  $("#expFormCard").hidden = !d.canRecord;
+  if (d.canRecord && !$("#expDate").value) $("#expDate").value = new Date().toISOString().slice(0,10);
+
+  const cols = [["spent_on","Date"],["amount","Amount","num"],["category","Category"],
+                ["description","Description"],["reference","Reference"],["note","Note"],
+                ["created_by","Recorded by"],["proof","Proof"],["act","",""]];
+  const head = `<thead><tr>${cols.map(c=>`<th class="${c[2]==='num'?'num':''}">${c[1]}</th>`).join("")}</tr></thead>`;
+  const body = d.expenses.map(e => `<tr>
+      <td>${String(e.spent_on).slice(0,10)}</td>
+      <td class="num">${money(e.amount)}</td>
+      <td>${disp(EXP_CAT[e.category] || e.category)}</td>
+      <td>${disp(e.description)}</td>
+      <td>${disp(e.reference)}</td>
+      <td>${disp(e.note)}</td>
+      <td class="page-sub">${disp(e.created_by)}</td>
+      <td>${e.has_proof ? `<a href="/api/expense-proof?id=${e.id}" target="_blank">view</a>` : "N/A"}</td>
+      <td>${d.canRecord ? `<span class="lnk-del" title="Delete expense" onclick="deleteExpense(${e.id})">×</span>` : ""}</td>
+    </tr>`).join("");
+  $("#tblExpenses").innerHTML = head + `<tbody>${body}</tbody>` +
+    (d.expenses.length ? "" : `<tbody><tr><td colspan="9" class="page-sub" style="padding:14px;">No expenses recorded yet.</td></tr></tbody>`);
+}
+
+$("#btnAddExpense")?.addEventListener("click", async () => {
+  const fd = new FormData();
+  fd.append("partner", partnerSlug);
+  fd.append("amount", $("#expAmount").value);
+  fd.append("spentOn", $("#expDate").value);
+  fd.append("category", $("#expCategory").value);
+  fd.append("description", $("#expDesc").value);
+  fd.append("reference", $("#expRef").value);
+  fd.append("note", $("#expNote").value);
+  const f = $("#expProof").files[0]; if (f) fd.append("file", f);
+
+  $("#expMsg").style.color = "var(--muted)";
+  $("#expMsg").textContent = "Saving…";
+  const r = await (await fetch("/api/expenses", { method: "POST", body: fd })).json();
+  if (r.ok) {
+    $("#expAmount").value = ""; $("#expDesc").value = ""; $("#expRef").value = "";
+    $("#expNote").value = ""; $("#expProof").value = "";
+    $("#expMsg").style.color = "var(--success)";
+    $("#expMsg").textContent = `Recorded. Balance now ${money(r.summary.balance)}.`;
+    loadExpenses(); load();
+  } else {
+    $("#expMsg").style.color = "var(--danger)";
+    $("#expMsg").textContent = r.error || "Could not save.";
+  }
+});
+
+async function deleteExpense(id) {
+  if (!confirm("Delete this expense? The balance payable will go back up.")) return;
+  const r = await (await fetch("/api/expenses/" + id, { method: "DELETE" })).json();
+  if (r.ok) { loadExpenses(); load(); }
   else alert("Could not delete: " + (r.error || "unknown"));
 }
 

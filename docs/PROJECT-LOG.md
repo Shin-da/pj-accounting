@@ -147,6 +147,61 @@ commits always trail the running count by one until the next edit.)
 
 <!-- newest first -->
 
+### 2026-09-10 — Partner expenses ledger (Léspérance) — build steps 2–5
+
+**Commits:** `<this commit>` (pushed to `main` → Render redeploy)
+
+**What changed**
+- **`expenses` table** in [db/schema.sql](../db/schema.sql) — per-partner ledger
+  mirroring `payments` (amount, spent_on, category, description, reference, note,
+  proof bytes, created_by), applied on boot like the rest of the schema.
+- **[src/expenses.js](../src/expenses.js)** (new) — `totalExpenses` /
+  `listExpenses` / `addExpense` / `deleteExpense` / `getProof`. `totalExpenses`
+  JOINs `partners` and filters on `flags->>'expenses'`, so a stray row for an
+  unflagged partner contributes 0 to any balance — the scoping is structural,
+  not just route-level.
+- **`payments.summary()`** now returns `{ earned, expenses, paid, balance,
+  status }` with `balance = earned − expenses − paid`. New `status: "credit"`
+  when expenses + paid exceed commission (partner owes PJ). Backward-compatible:
+  `expenses` is 0 for every partner without the flag, so RDR/LuxeTrust/Triara
+  are unchanged.
+- **Routes** in [src/server.js](../src/server.js): `GET/POST/DELETE
+  /api/expenses` + `GET /api/expense-proof`. Reads need `flags.expenses`
+  (403 otherwise); writes are admin/owner **and** re-check the partner flag
+  server-side. `effectiveFlags()` gains `expenses` for every role (tracks the
+  partner flag even for admin/owner). `/api/me` now includes each partner's
+  `flags` so the frontend can gate the nav on partner switch.
+- **Frontend**: "Expenses" nav item + `#page-expenses` (KPI row, add-form,
+  history table) modelled on Payouts. `syncExpensesNav()` shows/hides it per
+  current partner. Payouts KPIs and the Overview "Balance payable" card show the
+  `− expenses` term when non-zero. `Carries expenses` checkbox added to the
+  Partners admin page.
+- [docs/EXPENSES-DESIGN.md](EXPENSES-DESIGN.md) updated to "built" with the
+  decisions recorded.
+
+**Decisions** (owner hadn't answered §7; built with the assumption, each a small
+change to reverse)
+- Waterfall position: `earned − expenses − paid` (one line in `summary()`).
+- Categories: fixed pick-list (materials / labor / transport / food / advance /
+  adjustment / other), matching the Sept-2026 Léspérance breakdown.
+- Proof: optional, like payments.
+- Negative balance allowed; UI labels it "partner owes PJ" (`status: "credit"`).
+
+**Testing** — against a throwaway local Postgres DB (created + dropped; prod
+`.env` untouched): 22-assertion module smoke test green (flag scoping, the
+`earned − expenses − paid` math, `credit` status, proof bytes excluded from
+list, delete restores balance, audit rows). Authenticated HTTP round-trip:
+`GET/POST` 200 for `lesperance`, 403 for `rdr`; `DELETE` 200; `/api/me` carries
+flags.
+
+**Open / follow-ups**
+- Owner to confirm the four §7 decisions above.
+- Léspérance's actual Sept-2026 expense rows still need entering (the
+  `LESPERANCE EXPENSES.xlsx` breakdown); row 7 stickers are shared with Jinkee
+  and need an allocation before entry.
+
+---
+
 ### 2026-09-07 — Remove duplicate partners from Supabase; redeploy-persistence check
 
 **Commits:** none (production-DB cleanup + a gitignored file; this log update is
@@ -287,8 +342,11 @@ other pending `data/` entries into the Supabase DB — see Open items.
 - **`.env` line 18** holds a plaintext Supabase connection string incl. password.
   The file is gitignored, but the credential is sitting on disk in cleartext —
   consider whether it should be there.
-- **Expenses feature** — only step 1 (partner seed) is done. Steps 2–5 blocked on
-  the owner answering the §1/§7 questions in `docs/EXPENSES-DESIGN.md`.
+- **Expenses feature** — built and deployed 2026-09-10 (steps 1–5). Owner still
+  to confirm the four §7 decisions (waterfall position, category list, optional
+  proof, negative-balance handling) — all recorded in `docs/EXPENSES-DESIGN.md`
+  and each a small change to reverse. Léspérance's real expense rows not yet
+  entered; row 7 (stickers) is shared with Jinkee and needs an allocation first.
 - **Viewer account persistence** — the account is in the Supabase DB now. If the
   DB is ever rebuilt from `data/`, `data/users.json` carries it; otherwise that
   file is just a backup.
