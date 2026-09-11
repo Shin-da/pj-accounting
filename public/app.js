@@ -933,10 +933,38 @@ function updateUploadCurrent() {
     ? `Currently loaded: ${p.dataset.fileName || "unnamed file"} — ${p.dataset.rows.toLocaleString()} rows, uploaded ${p.dataset.uploadedAt.slice(0,10)}. Uploading now will replace it.`
     : "No file uploaded yet for this partner.";
 }
+async function loadUploadHistory() {
+  const slug = $("#uploadPartner").value;
+  const box = $("#uploadHistory");
+  if (!box) return;
+  if (!slug) { box.innerHTML = ""; return; }
+  const d = await (await fetch(`/api/partners/${slug}/datasets`)).json();
+  const list = d.datasets || [];
+  if (!list.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="upload-hist">` +
+    `<div class="upload-hist-title">Upload history — restore an older one if the wrong file replaced it</div>` +
+    list.map(ds => `
+      <div class="upload-hist-row${ds.is_current ? " current" : ""}">
+        <span>${esc(ds.file_name || "unnamed")} — ${ds.rows} rows, ${ds.uploaded_at.slice(0,10)}${ds.is_current ? " (current)" : ""}</span>
+        ${ds.is_current ? "" : `<button class="btn btn-ghost btn-sm" data-restore="${ds.id}">Restore</button>`}
+      </div>`).join("") +
+    `</div>`;
+  box.querySelectorAll("[data-restore]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Make this the current dataset for this partner? The report will switch to showing these rows instead of what's loaded now.")) return;
+      const r = await (await fetch(`/api/partners/${slug}/datasets/${btn.dataset.restore}/restore`, { method: "POST" })).json();
+      if (!r.ok) { alert("Failed: " + (r.error || "unknown")); return; }
+      $("#uploadMsg").style.color = ""; $("#uploadMsg").textContent = "Restored.";
+      const d2 = await (await fetch("/api/partners")).json(); partnersCache = d2.partners;
+      updateUploadCurrent(); loadUploadHistory();
+      if (slug === partnerSlug) load();
+    });
+  });
+}
 async function openUpload() {
   $("#ovl").classList.add("open"); $("#modal").classList.add("open"); $("#uploadMsg").textContent="";
   const d = await (await fetch("/api/partners")).json(); partnersCache = d.partners;
-  updateUploadCurrent();
+  updateUploadCurrent(); loadUploadHistory();
 }
 function closeModals() { $("#ovl").classList.remove("open"); $("#modal").classList.remove("open"); $("#pwModal").classList.remove("open"); $("#invModal").classList.remove("open"); }
 
@@ -952,12 +980,25 @@ document.addEventListener("keydown", (e) => {
   }
 });
 $("#uploadBtn")?.addEventListener("click", openUpload);
-$("#uploadPartner")?.addEventListener("change", updateUploadCurrent);
-$("#doUpload")?.addEventListener("click", async () => {
+$("#uploadPartner")?.addEventListener("change", () => { updateUploadCurrent(); loadUploadHistory(); });
+async function performUpload(force) {
   const f = $("#fileInput").files[0]; if (!f) { $("#uploadMsg").textContent = "Choose a file first."; return; }
   const fd = new FormData(); fd.append("file", f); fd.append("partner", $("#uploadPartner").value);
-  $("#uploadMsg").textContent = "Uploading…";
-  const r = await (await fetch("/api/upload", { method:"POST", body: fd })).json();
+  if (force) fd.append("force", "1");
+  $("#uploadMsg").style.color = ""; $("#uploadMsg").textContent = "Uploading…";
+  const resp = await fetch("/api/upload", { method:"POST", body: fd });
+  const r = await resp.json();
+  if (resp.status === 409 && r.needsConfirmation) {
+    // This file has far fewer rows than what's currently loaded — almost
+    // always a partial sheet, not a genuinely smaller register. Old rows
+    // never delete on upload, but they DO vanish from the report the moment
+    // a smaller file becomes current, so make that explicit before it happens.
+    $("#uploadMsg").style.color = "var(--warning)";
+    $("#uploadMsg").innerHTML = esc(r.message) +
+      `<span class="upload-warn"><button class="btn btn-danger-ghost btn-sm" id="confirmUploadAnyway">Upload anyway, replace the report</button></span>`;
+    $("#confirmUploadAnyway").addEventListener("click", () => performUpload(true));
+    return;
+  }
   if (r.ok) {
     const dated = r.meta.datesParsed != null ? `, ${r.meta.datesParsed} dated` : "";
     let msg = `Loaded "${r.meta.fileName}" — ${r.rows} rows${dated} for ${r.partner}.`;
@@ -973,6 +1014,7 @@ $("#doUpload")?.addEventListener("click", async () => {
       $("#uploadMsg").textContent = msg;
     }
     const d = await (await fetch("/api/partners")).json(); partnersCache = d.partners; updateUploadCurrent();
+    loadUploadHistory();
     if (r.partner === partnerSlug) load();
     if (!warnings.length) setTimeout(closeModals, 1600);
   }
@@ -980,7 +1022,8 @@ $("#doUpload")?.addEventListener("click", async () => {
     $("#uploadMsg").style.color = "var(--danger)";
     $("#uploadMsg").textContent = "Failed: " + (r.error || "unknown");
   }
-});
+}
+$("#doUpload")?.addEventListener("click", () => performUpload(false));
 
 $("#userBtn")?.addEventListener("click", (e) => { e.stopPropagation(); $("#userMenu").hidden = !$("#userMenu").hidden; });
 document.addEventListener("click", () => { $("#userMenu").hidden = true; });

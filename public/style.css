@@ -3299,6 +3299,14 @@ td.num { color: var(--text); }
 .keyin { width: 100%; background: var(--bg); border: 1px solid var(--border2); color: var(--text); border-radius: var(--r-md); padding: 8px 11px; margin-bottom: 10px; font-family: var(--sans); }
 .modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
+.upload-hist { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+.upload-hist-title { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.upload-hist-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 0; font-size: 12px; }
+.upload-hist-row + .upload-hist-row { border-top: 1px solid var(--border); }
+.upload-hist-row.current { color: var(--text); }
+.upload-hist-row:not(.current) { color: var(--muted); }
+.upload-warn { display: block; margin-top: 8px; }
+
 /* Password field with a show/hide (eye) toggle. Wrap an <input> and a
    <button class="pw-eye"> in <span class="pw-field">; the wrapper carries the
    input's bottom margin so the button lines up with the box, not the gap. */

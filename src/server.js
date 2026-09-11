@@ -413,6 +413,28 @@ app.post("/api/upload", auth.requireRole("admin"), upload.single("file"), wrap(a
     }
     parsed.meta.fileName = req.file.originalname;
 
+    // Guard against uploading a PARTIAL sheet (e.g. "just this week's new
+    // invoices") over a full register: every upload replaces the whole
+    // report, so a big row-count drop almost always means lost history, not
+    // a genuinely smaller register. Old rows are never deleted by this (they
+    // stay in Postgres under the old dataset), but they vanish from the
+    // report the moment the smaller file becomes current — so ask first.
+    const force = String((req.body && req.body.force) || "") === "1";
+    if (!force) {
+      const current = await partners.loadDataset(partner.slug);
+      const currentRows = current.meta ? current.meta.rows : 0;
+      if (currentRows >= 5 && parsed.records.length < currentRows * 0.8) {
+        return res.status(409).json({
+          needsConfirmation: true,
+          currentRows, newRows: parsed.records.length,
+          message: `The current report for ${partner.name} has ${currentRows} rows. This file only has ` +
+            `${parsed.records.length} — uploading will replace the report and hide the other ` +
+            `${currentRows - parsed.records.length} row(s). They are not deleted (Upload history can restore ` +
+            `them), but they won't show up here until then. Continue anyway?`,
+        });
+      }
+    }
+
     // Warn if the sheet contains invoice numbers that already exist as MANUAL
     // invoices — otherwise the same invoice would appear twice in the report.
     const manualNos = await invoices.manualInvoiceNumbers(partner.slug);
@@ -495,6 +517,18 @@ app.patch("/api/partners/:slug", auth.requireRole("admin"), wrap(async (req, res
 // Upload history — lets a bad upload be identified (and later rolled back).
 app.get("/api/partners/:slug/datasets", auth.requireRole("admin", "owner", "viewer"), wrap(async (req, res) => {
   res.json({ datasets: await partners.listDatasets(req.params.slug) });
+}));
+
+// Roll back to a past upload — the undo for a partial/bad upload.
+app.post("/api/partners/:slug/datasets/:id/restore", auth.requireRole("admin"), wrap(async (req, res) => {
+  try {
+    await partners.restoreDataset(req.params.slug, req.params.id);
+    await invoices.audit(null, {
+      actor: req.user.email, action: "restore-dataset", partnerSlug: req.params.slug,
+      entity: req.params.id,
+    });
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 }));
 
 // ── manual invoices (admin) ──────────────────────────────

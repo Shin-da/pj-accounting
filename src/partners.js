@@ -221,6 +221,22 @@ async function loadDataset(slug) {
   return { records: rows.map(rowToRecord), meta };
 }
 
+/**
+ * Reactivate a past upload as the partner's current dataset — the undo for a
+ * bad upload (e.g. a partial sheet that hid older rows). The dataset's own
+ * `records` were never touched by the bad upload, so this is a pure flag
+ * flip: no row is re-inserted or re-parsed.
+ */
+async function restoreDataset(slug, datasetId) {
+  return db.tx(async (client) => {
+    const found = await client.query(
+      "SELECT id FROM datasets WHERE id = $1 AND partner_slug = $2", [datasetId, slug]);
+    if (!found.rows.length) throw new Error("dataset not found for this partner");
+    await client.query("UPDATE datasets SET is_current = FALSE WHERE partner_slug = $1", [slug]);
+    await client.query("UPDATE datasets SET is_current = TRUE WHERE id = $1", [datasetId]);
+  });
+}
+
 /** Upload history for a partner (newest first). */
 async function listDatasets(slug) {
   return db.query(
@@ -236,5 +252,5 @@ async function listDatasets(slug) {
 module.exports = {
   DEFAULT_FLAGS, BUILTIN_PARTNERS, listPartners, getPartner, createPartner,
   ensurePartner, seedPartners, updatePartner,
-  loadDataset, saveDataset, listDatasets, slugify,
+  loadDataset, saveDataset, restoreDataset, listDatasets, slugify,
 };
