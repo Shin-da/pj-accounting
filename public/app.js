@@ -942,16 +942,21 @@ async function loadUploadHistory() {
   const list = d.datasets || [];
   if (!list.length) { box.innerHTML = ""; return; }
   box.innerHTML = `<div class="upload-hist">` +
-    `<div class="upload-hist-title">Upload history — restore an older one if the wrong file replaced it</div>` +
+    `<div class="upload-hist-head"><div class="upload-hist-title">Upload history — download an older file to re-upload it ` +
+    `(merges in whatever it has that isn't here yet); Restore is the emergency undo, it replaces what's showing instead of adding to it</div></div>` +
     list.map(ds => `
       <div class="upload-hist-row${ds.is_current ? " current" : ""}">
         <span>${esc(ds.file_name || "unnamed")} — ${ds.rows} rows, ${ds.uploaded_at.slice(0,10)}${ds.is_current ? " (current)" : ""}</span>
-        ${ds.is_current ? "" : `<button class="btn btn-ghost btn-sm" data-restore="${ds.id}">Restore</button>`}
+        <span style="display:flex; gap:6px;">
+          <a class="btn btn-ghost btn-sm" href="/api/dataset-file?id=${ds.id}" target="_blank" rel="noopener">Download</a>
+          ${ds.is_current ? "" : `<button class="btn btn-ghost btn-sm" data-restore="${ds.id}">Restore</button>`}
+        </span>
       </div>`).join("") +
     `</div>`;
   box.querySelectorAll("[data-restore]").forEach(btn => {
     btn.addEventListener("click", async () => {
-      if (!confirm("Make this the current dataset for this partner? The report will switch to showing these rows instead of what's loaded now.")) return;
+      if (!confirm("Make this the current dataset for this partner? This REPLACES what's showing now with this older snapshot " +
+        "(anything merged in since won't show until re-uploaded) — use this only to undo a bad upload, not to add rows.")) return;
       const r = await (await fetch(`/api/partners/${slug}/datasets/${btn.dataset.restore}/restore`, { method: "POST" })).json();
       if (!r.ok) { alert("Failed: " + (r.error || "unknown")); return; }
       $("#uploadMsg").style.color = ""; $("#uploadMsg").textContent = "Restored.";
@@ -996,23 +1001,25 @@ function renderConflicts(slug, conflicts) {
   const val = (obj, f) => obj[f] == null || obj[f] === "" ? "—" : String(obj[f]);
 
   box.innerHTML = `<div class="upload-hist">
-    <div class="upload-hist-title">${conflicts.length} row(s) already exist but changed — choose which to overwrite</div>
-    <div class="modal-foot" style="justify-content:flex-start; gap:8px; margin:4px 0 8px;">
-      <button class="btn btn-ghost btn-sm" id="conflictsCheckAll">Overwrite all</button>
-      <button class="btn btn-ghost btn-sm" id="conflictsCheckNone">Keep all as-is</button>
+    <div class="upload-hist-head">
+      <div class="upload-hist-title">${conflicts.length} row(s) already exist but changed — choose which to overwrite</div>
+      <div class="upload-hist-actions">
+        <button class="btn btn-ghost btn-sm" id="conflictsCheckAll">Overwrite all</button>
+        <button class="btn btn-ghost btn-sm" id="conflictsCheckNone">Keep all as-is</button>
+      </div>
     </div>` +
     conflicts.map((c, i) => `
-      <div class="upload-hist-row" style="align-items:flex-start; flex-direction:column; gap:4px;">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+      <div class="upload-hist-row upload-conflict-row">
+        <label>
           <input type="checkbox" class="conflict-cb" data-i="${i}">
           <strong>${esc(c.invoice || "(no invoice)")}</strong> ${esc(c.client || "")}
           ${c.pjCode ? `· ${esc(c.pjCode)}` : ""}${c.itemCode ? ` · ${esc(c.itemCode)}` : ""}
         </label>
-        <div class="page-sub" style="margin-left:26px;">
+        <div class="page-sub upload-conflict-diff">
           ${c.changedFields.map((f) => `${fieldLabel[f] || f}: <span class="mono">${esc(val(c.existing, f))}</span> → <span class="mono">${esc(val(c.incoming, f))}</span>`).join("<br>")}
         </div>
       </div>`).join("") +
-    `<div class="modal-foot">
+    `<div class="upload-hist-foot">
       <button class="btn btn-primary btn-sm" id="applyConflicts">Apply selected</button>
     </div></div>`;
 
