@@ -16,6 +16,8 @@ On first run it seeds one admin account (prints a temporary password to the cons
 
 Open **http://localhost:5055**, click **Upload Excel**, choose the RDR sales file. Anyone who opens the URL sees the dashboard (read-only); only the Upload button changes the data.
 
+Uploading merges into what's already there instead of replacing it: a row matching an existing invoice + PJ code + item code with the same values is left alone, a genuinely new row is added, and a matching row whose values changed is held back for the admin to approve overwriting it row-by-row.
+
 ## The Excel
 
 Columns are matched by name (case- and order-insensitive), so the layout can change without breaking anything. Currently recognised (see `config.js` to add spellings):

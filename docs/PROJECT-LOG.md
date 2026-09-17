@@ -147,6 +147,85 @@ commits always trail the running count by one until the next edit.)
 
 <!-- newest first -->
 
+### 2026-09-17 — Upload switched from replace to merge (database is the source of truth)
+
+**Commits:** `<uncommitted>`
+
+**Why**: RDR's uploader (`garciabrandongilbert@perfectjewelry.com`) sent partial
+sheets twice (162→34 rows on 09-11, 196→78 on 09-16). Each replace hid the rest
+of the register — nothing was deleted, but it *looked* deleted, and it took a
+manual DB fix (restoring dataset 19, 196 rows, as current — see below) to
+recover. The recurring cause: every upload wholesale-replaced the partner's
+register, which is fine for a full re-export but actively dangerous for a
+partial one. Fixed the model instead of just the symptom.
+
+**Live-data incident, fixed first**: found and corrected via direct read/write
+against the production Supabase DB (with explicit user go-ahead) — RDR's
+`is_current` dataset had been left on id 20 (78 rows, the accidental partial
+upload) instead of id 19 (196 rows, the correct merged data) after some
+restore-toggling on 09-17. Flipped back to 19 via the existing
+`partners.restoreDataset` — a pure flag flip, no rows touched. Root-caused via
+the `datasets`/`records`/`audit_log` tables, not guesswork.
+
+**What changed**
+- **[src/partners.js](../src/partners.js)**: new `mergeUpload()` replaces
+  `saveDataset()` as the path `/api/upload` uses. Matches an incoming row to an
+  existing one by `(invoice, PJ code, item code)` — the closest thing this data
+  has to a stable line-item key; rows sharing an ambiguous key (blank/placeholder
+  codes on older invoices) pair up by order of appearance within that key.
+  A matched row with identical values is left alone; a genuinely new key is
+  inserted; a matched row with a different value is returned as a **conflict**
+  and NOT written until approved. New rows land in the partner's existing
+  `is_current` dataset (created once if none exists yet) instead of spawning a
+  new "replace" dataset row each upload — so `payments.js`'s
+  `d.is_current = TRUE` join, and everything else keyed off the live dataset,
+  needed no changes.
+- New `applyConflictDecisions()` — applies only the rows an admin explicitly
+  approved to overwrite; everything else keeps its current database value.
+  Logged to `audit_log` as `upload.overwrite-row` with before/after.
+- **[src/server.js](../src/server.js)**: `/api/upload` now calls `mergeUpload`
+  and returns `{ added, unchanged, conflicts }` instead of replacing outright;
+  dropped the old "this file has far fewer rows, replace anyway?" 409 guard —
+  it was solving the replace model's danger, which no longer exists. Added
+  `POST /api/upload/resolve` (admin-only) to apply conflict decisions.
+- **[public/app.js](../public/app.js) / [index.html](../public/index.html)**:
+  upload modal shows added/unchanged counts and, when there are conflicts, a
+  per-row before → after diff with "Overwrite" checkboxes (default unchecked =
+  keep the database value) plus Overwrite all / Keep all shortcuts.
+- **Old dataset-snapshot Restore (Upload history) is UNCHANGED** and still
+  works as the emergency escape hatch — it's what fixed the live incident above
+  — because merges write into the *current* dataset's rows rather than
+  replacing the dataset pointer.
+- **[test/upload-guard.js](../test/upload-guard.js)**: rewritten for the new
+  behavior (was testing the row-count-drop guard being removed). Verifies
+  added/unchanged/conflict counts, that untouched rows survive, that an
+  unresolved conflict keeps the old value, that a partner role can't call
+  `/resolve`, and that an approved overwrite updates in place (no row-count
+  change). Caught a real bug in the first pass: the diff compared a raw
+  `NULL`/empty `supplier` column against parse.js's `"—"` placeholder and
+  flagged every legacy blank-supplier row as "changed" — fixed by normalising
+  both sides the same way before comparing.
+
+**Known limitation**: matching by `(invoice, PJ code, item code)` is
+positional when that key repeats within an invoice (older rows with no PJ/item
+code at all — e.g. invoice RDR0041, 19 lines, all blank codes). The upload
+response surfaces a count of these ambiguous groups as a warning so it's not
+silent, but a reordered re-export of such an invoice could show spurious
+"changed" conflicts. No schema change was made to add a real per-line id;
+worth doing if this warning shows up often in practice.
+
+**Open / follow-ups**
+- Consider asking whoever uploads for RDR to stop sending partial/incremental
+  extracts now that merge makes it safe either way — it's no longer strictly
+  necessary, but a full re-export still produces fewer spurious conflicts than
+  a partial one re-keyed against edited rows.
+- Local `.env` currently points `DATABASE_URL` at the same Supabase project
+  Render production uses (the file's own comment says "not the live one" —
+  it currently is). Worth a real dev database if more local testing against
+  data happens again.
+
+---
+
 ### 2026-09-10 — Isolation audit + partner-switch hardening
 
 **Commits:** `<this commit>` (pushed to `main` → Render redeploy)

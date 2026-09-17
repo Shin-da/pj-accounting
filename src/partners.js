@@ -14,6 +14,7 @@
  * Admins and the owner always see everything. Default is privacy-safe.
  */
 const db = require("./db");
+const invoices = require("./invoices");
 
 const DEFAULT_FLAGS = { commission: true, cost: false, margin: false, onelive: false, expenses: false };
 
@@ -188,6 +189,199 @@ async function saveDataset(slug, parsed, opts = {}) {
   });
 }
 
+// ── merge upload (append/update, never silently replace) ────
+/*
+ * Match an incoming spreadsheet row to an existing DB row by
+ * (invoice, PJ code, item code) — the closest thing this data has to a
+ * stable line-item identity. When several rows share the same key (blank or
+ * placeholder codes, e.g. "-" / "N/A" on older invoices), pairs are matched
+ * by order of appearance within that key. Not perfect, but it means a
+ * genuinely new line is still recognised as new rather than as a false
+ * "changed" match, and every guess here is reviewable before it's applied —
+ * nothing is written to a matched row until the admin says overwrite.
+ */
+function rowKey(invoice, pjCode, itemCode) {
+  const n = (v) => String(v ?? "").trim().toUpperCase();
+  return `${n(invoice)}|${n(pjCode)}|${n(itemCode)}`;
+}
+
+const CMP_NUM = ["weight", "capitalPerGram", "supplierPrice", "amount", "onelive", "commissionValue"];
+const DB_COL = { capitalPerGram: "capital_per_gram", supplierPrice: "supplier_price",
+                 commissionValue: "commission_value", commissionType: "commission_type",
+                 sellerStatus: "seller_status", itemType: "item_type" };
+
+/** Normalise one row — DB shape (snake_case) or parsed shape (camelCase) — for comparison. */
+function comparable(row, isDbRow) {
+  const g = (camel) => (isDbRow ? row[DB_COL[camel] || camel] : row[camel]);
+  const date = isDbRow
+    ? (row.txn_date instanceof Date
+        ? `${row.txn_date.getFullYear()}-${String(row.txn_date.getMonth() + 1).padStart(2, "0")}-${String(row.txn_date.getDate()).padStart(2, "0")}`
+        : (row.txn_date ? String(row.txn_date).slice(0, 10) : null))
+    : (row.date || null);
+  const out = {
+    date,
+    client: String(g("client") ?? "").trim(),
+    itemType: String(g("itemType") ?? "").trim(),
+    // "—" is parse.js's own placeholder for "no supplier on the sheet", and a
+    // blank/NULL database value (e.g. from an older import) means the same
+    // thing — normalise both to it so a legacy blank row isn't flagged as
+    // "changed" just because a fresh upload spells its blank differently.
+    supplier: String(g("supplier") ?? "").trim() || "—",
+    commission: String(g("commission") ?? "").trim(),
+    commissionType: String(g("commissionType") ?? "").trim().toUpperCase(),
+    sellerStatus: String(g("sellerStatus") ?? "").trim().toUpperCase(),
+  };
+  for (const f of CMP_NUM) out[f] = Math.round((Number(g(f)) || 0) * 100);
+  return out;
+}
+
+/** Field names (in the incoming/parsed shape) that differ, or [] when the row is unchanged. */
+function diffFields(existingDbRow, incomingRecord) {
+  const a = comparable(existingDbRow, true);
+  const b = comparable(incomingRecord, false);
+  return Object.keys(a).filter((k) => a[k] !== b[k]);
+}
+
+/**
+ * Merge a freshly parsed upload into the partner's live (is_current) dataset
+ * instead of replacing it:
+ *   - a row whose key isn't already there            -> inserted
+ *   - a row whose key matches and every field is same -> left alone (it's
+ *     already in the database — nothing to do)
+ *   - a row whose key matches but a field differs      -> reported back as a
+ *     conflict; NOTHING is changed until the admin picks overwrite or keep
+ *     via applyConflictDecisions()
+ * Rows already in the database that the new file doesn't mention at all are
+ * never touched — this only adds and (on explicit request) updates, never
+ * deletes. Runs in one transaction: either the whole merge lands, or none of
+ * it does.
+ */
+async function mergeUpload(slug, parsed, opts = {}) {
+  return db.tx(async (client) => {
+    const cur = (await client.query(
+      `SELECT id FROM datasets WHERE partner_slug = $1 AND is_current = TRUE
+       ORDER BY uploaded_at DESC LIMIT 1`, [slug])).rows[0];
+
+    let datasetId;
+    if (cur) {
+      datasetId = cur.id;
+      // Keep the live dataset row's metadata pointed at the most recent file
+      // that contributed to it — the full history of every contributing
+      // upload lives in audit_log, not here.
+      await client.query(
+        `UPDATE datasets SET file_name = $1, uploaded_by = $2, uploaded_at = NOW(),
+                              meta = $3, file_bytes = $4, file_mime = $5 WHERE id = $6`,
+        [opts.fileName || null, opts.uploadedBy || null, JSON.stringify(parsed.meta || {}),
+         opts.fileBytes || null, opts.fileMime || null, datasetId]);
+    } else {
+      const ds = await client.query(
+        `INSERT INTO datasets (partner_slug, file_name, uploaded_by, meta, is_current,
+                               file_bytes, file_mime)
+         VALUES ($1, $2, $3, $4, TRUE, $5, $6) RETURNING id`,
+        [slug, opts.fileName || null, opts.uploadedBy || null, JSON.stringify(parsed.meta || {}),
+         opts.fileBytes || null, opts.fileMime || null]);
+      datasetId = ds.rows[0].id;
+    }
+
+    const existingRows = (await client.query(
+      `SELECT * FROM records WHERE dataset_id = $1 AND source = 'import' ORDER BY id`,
+      [datasetId])).rows;
+
+    const byKey = new Map();
+    for (const r of existingRows) {
+      const k = rowKey(r.invoice, r.pj_code, r.item_code);
+      if (!byKey.has(k)) byKey.set(k, []);
+      byKey.get(k).push(r);
+    }
+    let ambiguousGroups = 0;
+    for (const bucket of byKey.values()) if (bucket.length > 1) ambiguousGroups++;
+
+    const used = new Map();
+    const toInsert = [];
+    const conflicts = [];
+    let unchanged = 0;
+
+    for (const rec of parsed.records || []) {
+      const k = rowKey(rec.invoice, rec.pjCode, rec.itemCode);
+      const bucket = byKey.get(k) || [];
+      const seen = used.get(k) || 0;
+      if (seen < bucket.length) {
+        used.set(k, seen + 1);
+        const existingRow = bucket[seen];
+        const changed = diffFields(existingRow, rec);
+        if (!changed.length) {
+          unchanged++;
+        } else {
+          conflicts.push({
+            recordId: existingRow.id,
+            invoice: rec.invoice, pjCode: rec.pjCode, itemCode: rec.itemCode,
+            client: rec.client, changedFields: changed,
+            existing: rowToRecord(existingRow), incoming: rec,
+          });
+        }
+      } else {
+        toInsert.push(rec);
+      }
+    }
+
+    const CHUNK = 500;
+    for (let start = 0; start < toInsert.length; start += CHUNK) {
+      const slice = toInsert.slice(start, start + CHUNK);
+      const values = [];
+      const tuples = slice.map((r, j) => {
+        const vals = recordToRow(datasetId, slug, r, start + j);
+        const ph = vals.map((_, k2) => `$${values.length + k2 + 1}`);
+        values.push(...vals);
+        return `(${ph.join(",")})`;
+      });
+      await client.query(
+        `INSERT INTO records (${REC_COLS.join(",")}) VALUES ${tuples.join(",")}`, values);
+    }
+
+    return { datasetId, added: toInsert.length, unchanged, conflicts, ambiguousGroups };
+  });
+}
+
+/**
+ * Apply admin decisions on rows a merge flagged as changed. Only rows the
+ * admin explicitly chose to overwrite are touched; anything left out keeps
+ * exactly the value already in the database.
+ */
+async function applyConflictDecisions(slug, decisions, actor) {
+  return db.tx(async (client) => {
+    let applied = 0;
+    for (const d of decisions || []) {
+      const rows = (await client.query(
+        `SELECT * FROM records WHERE id = $1 AND partner_slug = $2 AND source = 'import'`,
+        [d.recordId, slug])).rows;
+      if (!rows.length) continue;
+      const before = rows[0];
+      const rec = d.incoming || {};
+      await client.query(
+        `UPDATE records SET
+           txn_date = $1, client = $2, item_type = $3, supplier = $4, weight = $5,
+           capital_per_gram = $6, supplier_price = $7, amount = $8, onelive = $9,
+           commission = $10, commission_type = $11, commission_value = $12,
+           seller_status = $13, updated_at = NOW()
+         WHERE id = $14`,
+        [rec.date || null, String(rec.client || "").trim(), String(rec.itemType || "").trim(),
+         String(rec.supplier || "").trim(), Number(rec.weight) || 0, Number(rec.capitalPerGram) || 0,
+         Number(rec.supplierPrice) || 0, Number(rec.amount) || 0, Number(rec.onelive) || 0,
+         rec.commission == null ? null : String(rec.commission),
+         rec.commissionType ? String(rec.commissionType).toUpperCase() : null,
+         Number(rec.commissionValue) || 0,
+         rec.sellerStatus ? String(rec.sellerStatus).toUpperCase() : null,
+         before.id]);
+      applied++;
+      await invoices.audit(client, {
+        actor, action: "upload.overwrite-row", partnerSlug: slug, entity: before.invoice,
+        details: { recordId: before.id, before: rowToRecord(before), after: rec },
+      });
+    }
+    return { applied };
+  });
+}
+
 /** The partner's current dataset, in the same shape the app used to read from JSON. */
 async function loadDataset(slug) {
   const ds = await db.one(
@@ -252,5 +446,6 @@ async function listDatasets(slug) {
 module.exports = {
   DEFAULT_FLAGS, BUILTIN_PARTNERS, listPartners, getPartner, createPartner,
   ensurePartner, seedPartners, updatePartner,
-  loadDataset, saveDataset, restoreDataset, listDatasets, slugify,
+  loadDataset, saveDataset, mergeUpload, applyConflictDecisions,
+  restoreDataset, listDatasets, slugify,
 };

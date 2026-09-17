@@ -263,12 +263,14 @@
   <div id="ovl" class="ovl" onclick="closeModals()"></div>
   <div id="modal" class="modal">
     <h3>Upload sales Excel</h3>
-    <p class="page-sub">Choose the partner this file belongs to. The latest upload replaces that partner's data.</p>
+    <p class="page-sub">Choose the partner this file belongs to. New rows are added; rows already in the
+      database are left alone; a row that matches but changed will ask before it's overwritten.</p>
     <label class="kpi-label">Partner</label>
     <select id="uploadPartner" class="filter-select" style="width:100%; margin:6px 0 8px;"></select>
     <div id="uploadCurrent" class="page-sub" style="margin-bottom:12px;"></div>
     <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
     <div id="uploadMsg" class="page-sub"></div>
+    <div id="uploadConflicts"></div>
     <div id="uploadHistory"></div>
     <div class="modal-foot">
       <button class="btn btn-ghost btn-sm" onclick="closeModals()">Cancel</button>

@@ -930,7 +930,7 @@ $("#addUser")?.addEventListener("click", async () => {
 function updateUploadCurrent() {
   const p = partnersCache.find(x => x.slug === $("#uploadPartner").value);
   $("#uploadCurrent").textContent = p && p.dataset
-    ? `Currently loaded: ${p.dataset.fileName || "unnamed file"} — ${p.dataset.rows.toLocaleString()} rows, uploaded ${p.dataset.uploadedAt.slice(0,10)}. Uploading now will replace it.`
+    ? `Currently on file: ${p.dataset.fileName || "unnamed file"} — ${p.dataset.rows.toLocaleString()} rows, last updated ${p.dataset.uploadedAt.slice(0,10)}. Uploading now adds to this, it does not replace it.`
     : "No file uploaded yet for this partner.";
 }
 async function loadUploadHistory() {
@@ -980,28 +980,72 @@ document.addEventListener("keydown", (e) => {
   }
 });
 $("#uploadBtn")?.addEventListener("click", openUpload);
-$("#uploadPartner")?.addEventListener("change", () => { updateUploadCurrent(); loadUploadHistory(); });
-async function performUpload(force) {
+$("#uploadPartner")?.addEventListener("change", () => { updateUploadCurrent(); loadUploadHistory(); $("#uploadConflicts").innerHTML = ""; });
+
+// Rows the merge found matching an existing invoice+PJ code+item code but
+// with different values. Nothing is written for any of these until the admin
+// picks, per row, whether the sheet's new value should overwrite what's in
+// the database — left unchecked, the database value stands.
+function renderConflicts(slug, conflicts) {
+  const box = $("#uploadConflicts");
+  if (!conflicts.length) { box.innerHTML = ""; return; }
+  const fieldLabel = { date:"Date", client:"Client", itemType:"Item type", supplier:"Supplier",
+    weight:"Weight", capitalPerGram:"Capital/gram", supplierPrice:"Supplier price", amount:"Amount",
+    onelive:"ONELIVE", commission:"Commission", commissionType:"Commission type",
+    commissionValue:"Commission value", sellerStatus:"Seller status" };
+  const val = (obj, f) => obj[f] == null || obj[f] === "" ? "—" : String(obj[f]);
+
+  box.innerHTML = `<div class="upload-hist">
+    <div class="upload-hist-title">${conflicts.length} row(s) already exist but changed — choose which to overwrite</div>
+    <div class="modal-foot" style="justify-content:flex-start; gap:8px; margin:4px 0 8px;">
+      <button class="btn btn-ghost btn-sm" id="conflictsCheckAll">Overwrite all</button>
+      <button class="btn btn-ghost btn-sm" id="conflictsCheckNone">Keep all as-is</button>
+    </div>` +
+    conflicts.map((c, i) => `
+      <div class="upload-hist-row" style="align-items:flex-start; flex-direction:column; gap:4px;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" class="conflict-cb" data-i="${i}">
+          <strong>${esc(c.invoice || "(no invoice)")}</strong> ${esc(c.client || "")}
+          ${c.pjCode ? `· ${esc(c.pjCode)}` : ""}${c.itemCode ? ` · ${esc(c.itemCode)}` : ""}
+        </label>
+        <div class="page-sub" style="margin-left:26px;">
+          ${c.changedFields.map((f) => `${fieldLabel[f] || f}: <span class="mono">${esc(val(c.existing, f))}</span> → <span class="mono">${esc(val(c.incoming, f))}</span>`).join("<br>")}
+        </div>
+      </div>`).join("") +
+    `<div class="modal-foot">
+      <button class="btn btn-primary btn-sm" id="applyConflicts">Apply selected</button>
+    </div></div>`;
+
+  $("#conflictsCheckAll").addEventListener("click", () => box.querySelectorAll(".conflict-cb").forEach((cb) => cb.checked = true));
+  $("#conflictsCheckNone").addEventListener("click", () => box.querySelectorAll(".conflict-cb").forEach((cb) => cb.checked = false));
+  $("#applyConflicts").addEventListener("click", async () => {
+    const decisions = [...box.querySelectorAll(".conflict-cb:checked")]
+      .map((cb) => conflicts[Number(cb.dataset.i)])
+      .map((c) => ({ recordId: c.recordId, incoming: c.incoming }));
+    if (!decisions.length) { box.innerHTML = ""; return; }
+    const r = await (await fetch("/api/upload/resolve", { method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ partner: slug, decisions }) })).json();
+    if (!r.ok) { alert("Failed: " + (r.error || "unknown")); return; }
+    box.innerHTML = "";
+    $("#uploadMsg").style.color = "";
+    $("#uploadMsg").textContent += ` ${r.applied} row(s) overwritten.`;
+    if (slug === partnerSlug) load();
+  });
+}
+
+async function performUpload() {
   const f = $("#fileInput").files[0]; if (!f) { $("#uploadMsg").textContent = "Choose a file first."; return; }
-  const fd = new FormData(); fd.append("file", f); fd.append("partner", $("#uploadPartner").value);
-  if (force) fd.append("force", "1");
+  const slug = $("#uploadPartner").value;
+  const fd = new FormData(); fd.append("file", f); fd.append("partner", slug);
   $("#uploadMsg").style.color = ""; $("#uploadMsg").textContent = "Uploading…";
+  $("#uploadConflicts").innerHTML = "";
   const resp = await fetch("/api/upload", { method:"POST", body: fd });
   const r = await resp.json();
-  if (resp.status === 409 && r.needsConfirmation) {
-    // This file has far fewer rows than what's currently loaded — almost
-    // always a partial sheet, not a genuinely smaller register. Old rows
-    // never delete on upload, but they DO vanish from the report the moment
-    // a smaller file becomes current, so make that explicit before it happens.
-    $("#uploadMsg").style.color = "var(--warning)";
-    $("#uploadMsg").innerHTML = esc(r.message) +
-      `<span class="upload-warn"><button class="btn btn-danger-ghost btn-sm" id="confirmUploadAnyway">Upload anyway, replace the report</button></span>`;
-    $("#confirmUploadAnyway").addEventListener("click", () => performUpload(true));
-    return;
-  }
   if (r.ok) {
     const dated = r.meta.datesParsed != null ? `, ${r.meta.datesParsed} dated` : "";
-    let msg = `Loaded "${r.meta.fileName}" — ${r.rows} rows${dated} for ${r.partner}.`;
+    let msg = `Loaded "${r.meta.fileName}"${dated} for ${r.partner}: ${r.added} new row(s) added, ` +
+      `${r.unchanged} already there.`;
     const warnings = r.warnings || [];
     if (warnings.length) {
       // Warnings were being computed and then thrown away. A file that loads
@@ -1013,17 +1057,18 @@ async function performUpload(force) {
       $("#uploadMsg").style.color = "";
       $("#uploadMsg").textContent = msg;
     }
+    renderConflicts(slug, r.conflicts || []);
     const d = await (await fetch("/api/partners")).json(); partnersCache = d.partners; updateUploadCurrent();
     loadUploadHistory();
     if (r.partner === partnerSlug) load();
-    if (!warnings.length) setTimeout(closeModals, 1600);
+    if (!warnings.length && !(r.conflicts || []).length) setTimeout(closeModals, 1600);
   }
   else {
     $("#uploadMsg").style.color = "var(--danger)";
     $("#uploadMsg").textContent = "Failed: " + (r.error || "unknown");
   }
 }
-$("#doUpload")?.addEventListener("click", () => performUpload(false));
+$("#doUpload")?.addEventListener("click", () => performUpload());
 
 $("#userBtn")?.addEventListener("click", (e) => { e.stopPropagation(); $("#userMenu").hidden = !$("#userMenu").hidden; });
 document.addEventListener("click", () => { $("#userMenu").hidden = true; });

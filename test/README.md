@@ -9,7 +9,7 @@ npm i --no-save pg-mem jsdom
 
 node test/preflight.js       # role scoping + data leaks     (pg-mem)
 node test/superadmin.js      # account rules + archival      (pg-mem)
-node test/upload-guard.js    # partial-upload guard + restore (pg-mem)
+node test/upload-guard.js    # upload merge + conflict resolve (pg-mem)
 node test/ui-smoke.js        # the page itself               (jsdom)
 node test/maintenance-ui.js  # maintenance page logic        (jsdom)
 ```
@@ -20,7 +20,7 @@ Run all before any deploy. Each exits non-zero on failure.
 |---|---|
 | `preflight.js` | Can a partner see or change anything outside their scope? |
 | `superadmin.js` | Can an ordinary admin lock out the superadmin — or each other? |
-| `upload-guard.js` | Is a partial upload caught before it hides the rest of the register, and can it be undone? |
+| `upload-guard.js` | Does an upload add/update instead of replacing — new rows added, unchanged rows left alone, changed rows held for admin approval? |
 | `ui-smoke.js` | Does the page render, drill down, and recolour in dark mode? |
 
 `pg-mem` is an in-memory Postgres, so these run without a database and never

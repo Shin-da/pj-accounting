@@ -100,7 +100,7 @@ Worth a two-minute check, in this order:
       differently from the real thing) — so eyeball it once.
 - [ ] Partner logo appears in the header
 - [ ] Log in as the RDR partner account and confirm supplier/cost are still hidden
-- [ ] Upload a new Excel and confirm it replaces the current dataset
+- [ ] Upload a new Excel and confirm it merges into the current dataset (new rows added, unchanged rows left alone, changed rows held for approval) rather than replacing it
 
 ---
 

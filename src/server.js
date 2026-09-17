@@ -401,6 +401,11 @@ app.get("/api/portfolio", auth.requireRole("admin", "owner", "viewer"), wrap(asy
 }));
 
 // ── upload (admin) ───────────────────────────────────────
+// The database is the source of truth: an upload never replaces it. A row
+// already there (same invoice + PJ code + item code) with the same values is
+// left alone; a genuinely new row is added; a matching row whose values
+// changed is reported back as a conflict for the admin to resolve via
+// /api/upload/resolve — nothing is overwritten without that explicit choice.
 app.post("/api/upload", auth.requireRole("admin"), upload.single("file"), wrap(async (req, res) => {
   const slug = (req.body && req.body.partner) || "";
   const partner = await partners.getPartner(slug);
@@ -413,49 +418,34 @@ app.post("/api/upload", auth.requireRole("admin"), upload.single("file"), wrap(a
     }
     parsed.meta.fileName = req.file.originalname;
 
-    // Guard against uploading a PARTIAL sheet (e.g. "just this week's new
-    // invoices") over a full register: every upload replaces the whole
-    // report, so a big row-count drop almost always means lost history, not
-    // a genuinely smaller register. Old rows are never deleted by this (they
-    // stay in Postgres under the old dataset), but they vanish from the
-    // report the moment the smaller file becomes current — so ask first.
-    const force = String((req.body && req.body.force) || "") === "1";
-    if (!force) {
-      const current = await partners.loadDataset(partner.slug);
-      const currentRows = current.meta ? current.meta.rows : 0;
-      if (currentRows >= 5 && parsed.records.length < currentRows * 0.8) {
-        return res.status(409).json({
-          needsConfirmation: true,
-          currentRows, newRows: parsed.records.length,
-          message: `The current report for ${partner.name} has ${currentRows} rows. This file only has ` +
-            `${parsed.records.length} — uploading will replace the report and hide the other ` +
-            `${currentRows - parsed.records.length} row(s). They are not deleted (Upload history can restore ` +
-            `them), but they won't show up here until then. Continue anyway?`,
-        });
-      }
-    }
-
     // Warn if the sheet contains invoice numbers that already exist as MANUAL
     // invoices — otherwise the same invoice would appear twice in the report.
     const manualNos = await invoices.manualInvoiceNumbers(partner.slug);
     const collisions = [...new Set(
       parsed.records.map((r) => r.invoice).filter((n) => n && manualNos.has(n)))];
 
-    const saved = await partners.saveDataset(partner.slug, parsed, {
+    const merged = await partners.mergeUpload(partner.slug, parsed, {
       fileName: req.file.originalname, uploadedBy: req.user.email,
       fileBytes: req.file.buffer, fileMime: req.file.mimetype,
     });
     await invoices.audit(null, {
       actor: req.user.email, action: "upload", partnerSlug: partner.slug,
       entity: req.file.originalname,
-      details: { rows: saved.rows, collisions },
+      details: { added: merged.added, unchanged: merged.unchanged,
+                 conflicts: merged.conflicts.length, collisions },
     });
     res.json({
-      ok: true, partner: partner.slug, meta: parsed.meta, rows: saved.rows,
+      ok: true, partner: partner.slug, meta: parsed.meta,
+      datasetId: merged.datasetId, added: merged.added, unchanged: merged.unchanged,
+      conflicts: merged.conflicts,
       // Parser warnings (unrecognised date column, unreadable dates) come
       // first: they affect every row, where a collision affects a handful.
       warnings: [
         ...(parsed.meta.warnings || []),
+        ...(merged.ambiguousGroups ? [
+          `${merged.ambiguousGroups} invoice(s) have multiple lines with no distinguishing item code, ` +
+          "so matching against the existing rows fell back to line order — worth a manual check."
+        ] : []),
         ...(collisions.length ? [
           `${collisions.length} invoice number(s) in this file already exist as manually-created ` +
           `invoices and now appear twice: ${collisions.slice(0, 5).join(", ")}` +
@@ -466,6 +456,22 @@ app.post("/api/upload", auth.requireRole("admin"), upload.single("file"), wrap(a
     });
   } catch (e) {
     res.status(500).json({ error: "could not read file: " + e.message });
+  }
+}));
+
+// Apply admin decisions on the rows a merge flagged as changed. Rows left out
+// of `decisions` simply keep their current database value.
+app.post("/api/upload/resolve", auth.requireRole("admin"), wrap(async (req, res) => {
+  const slug = (req.body && req.body.partner) || "";
+  const partner = await partners.getPartner(slug);
+  if (!partner) return res.status(400).json({ error: "unknown partner" });
+  const decisions = (req.body && req.body.decisions) || [];
+  if (!Array.isArray(decisions) || !decisions.length) return res.json({ ok: true, applied: 0 });
+  try {
+    const result = await partners.applyConflictDecisions(partner.slug, decisions, req.user.email);
+    res.json({ ok: true, applied: result.applied });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 }));
 
