@@ -5,7 +5,7 @@
   "description": "Perfect Jewel partner sales & commission accounting \u2014 multi-user, role-scoped dashboards fed by Excel uploads.",
   "main": "src/server.js",
   "scripts": {
-    "start": "node src/server.js",
+    "start": "node src/retired.js",
     "migrate": "node src/migrate.js",
     "dev:anonymize": "node scripts/anonymize.js",
     "dev:seed": "node scripts/seed-dev.js"
